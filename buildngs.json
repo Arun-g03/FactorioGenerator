@@ -1,0 +1,334 @@
+{
+    "buildings": {
+      "stone-furnace": {
+        "type": "smelting",
+        "size": [2, 2],
+        "ingredients": {
+          "stone": 5
+        }
+      },
+      "steel-furnace": {
+        "type": "smelting",
+        "size": [2, 2],
+        "ingredients": {
+          "steel-plate": 6,
+          "stone-brick": 10
+        }
+      },
+      "electric-furnace": {
+        "type": "smelting",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 10,
+          "advanced-circuit": 5,
+          "stone-brick": 10
+        }
+      },
+      "assembling-machine-1": {
+        "type": "assembly",
+        "size": [3, 3],
+        "ingredients": {
+          "iron-gear-wheel": 3,
+          "electronic-circuit": 3,
+          "iron-plate": 9
+        }
+      },
+      "assembling-machine-2": {
+        "type": "assembly",
+        "size": [3, 3],
+        "ingredients": {
+          "iron-gear-wheel": 5,
+          "electronic-circuit": 3,
+          "steel-plate": 9
+        }
+      },
+      "assembling-machine-3": {
+        "type": "assembly",
+        "size": [3, 3],
+        "ingredients": {
+          "speed-module": 4,
+          "assembling-machine-2": 1
+        }
+      },
+      "chemical-plant": {
+        "type": "chemical",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 5,
+          "iron-gear-wheel": 5,
+          "electronic-circuit": 5,
+          "pipe": 5
+        }
+      },
+      "oil-refinery": {
+        "type": "chemical",
+        "size": [5, 5],
+        "ingredients": {
+          "steel-plate": 15,
+          "iron-gear-wheel": 10,
+          "electronic-circuit": 10,
+          "pipe": 10,
+          "stone-brick": 10
+        }
+      },
+      "centrifuge": {
+        "type": "nuclear",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 100,
+          "advanced-circuit": 50,
+          "concrete": 100
+        }
+      },
+      "nuclear-reactor": {
+        "type": "nuclear",
+        "size": [5, 5],
+        "ingredients": {
+          "concrete": 500,
+          "steel-plate": 500,
+          "advanced-circuit": 500,
+          "copper-plate": 500
+        }
+      },
+      "heat-exchanger": {
+        "type": "energy",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 10,
+          "copper-plate": 100,
+          "pipe": 10
+        }
+      },
+      "steam-turbine": {
+        "type": "energy",
+        "size": [3, 5],
+        "ingredients": {
+          "iron-gear-wheel": 50,
+          "copper-plate": 50,
+          "pipe": 20
+        }
+      },
+      "boiler": {
+        "type": "energy",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 4,
+          "pipe": 4
+        }
+      },
+      "steam-engine": {
+        "type": "energy",
+        "size": [3, 5],
+        "ingredients": {
+          "iron-gear-wheel": 8,
+          "pipe": 5,
+          "iron-plate": 10
+        }
+      },
+      "solar-panel": {
+        "type": "energy",
+        "size": [3, 3],
+        "ingredients": {
+          "steel-plate": 5,
+          "electronic-circuit": 15,
+          "copper-plate": 5
+        }
+      },
+      "accumulator": {
+        "type": "energy",
+        "size": [2, 2],
+        "ingredients": {
+          "iron-plate": 2,
+          "battery": 5
+        }
+      },
+      "roboport": {
+        "type": "logistics",
+        "size": [4, 4],
+        "ingredients": {
+          "steel-plate": 45,
+          "iron-gear-wheel": 45,
+          "advanced-circuit": 45
+        }
+      },
+      "logistic-chest-active-provider": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 1,
+          "advanced-circuit": 1
+        }
+      },
+      "logistic-chest-passive-provider": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 1,
+          "advanced-circuit": 1
+        }
+      },
+      "logistic-chest-requester": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 1,
+          "advanced-circuit": 1
+        }
+      },
+      "logistic-chest-buffer": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 1,
+          "advanced-circuit": 1
+        }
+      },
+      "logistic-chest-storage": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 1,
+          "advanced-circuit": 1
+        }
+      },
+      "transport-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "iron-plate": 1,
+          "iron-gear-wheel": 1
+        }
+      },
+      "fast-transport-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "iron-gear-wheel": 5,
+          "transport-belt": 1
+        }
+      },
+      "express-transport-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "iron-gear-wheel": 10,
+          "fast-transport-belt": 1,
+          "lubricant": 1
+        }
+      },
+      "underground-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "iron-plate": 10,
+          "iron-gear-wheel": 5
+        }
+      },
+      "fast-underground-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "underground-belt": 2,
+          "iron-gear-wheel": 20
+        }
+      },
+      "express-underground-belt": {
+        "type": "logistics",
+        "size": [1, 1],
+        "ingredients": {
+          "fast-underground-belt": 2,
+          "iron-gear-wheel": 40,
+          "lubricant": 1
+        }
+      },
+      "splitter": {
+        "type": "logistics",
+        "size": [2, 1],
+        "ingredients": {
+          "iron-plate": 5,
+          "iron-gear-wheel": 5,
+          "electronic-circuit": 2
+        }
+      },
+      "fast-splitter": {
+        "type": "logistics",
+        "size": [2, 1],
+        "ingredients": {
+          "splitter": 1,
+          "iron-gear-wheel": 10,
+          "electronic-circuit": 10
+        }
+      },
+      "express-splitter": {
+        "type": "logistics",
+        "size": [2, 1],
+        "ingredients": {
+          "fast-splitter": 1,
+          "iron-gear-wheel": 10,
+          "lubricant": 1
+        }
+      },
+      "inserter": {
+        "type": "inserter",
+        "size": [1, 1],
+        "ingredients": {
+          "iron-plate": 1,
+          "iron-gear-wheel": 1,
+          "electronic-circuit": 1
+        }
+      },
+      "fast-inserter": {
+        "type": "inserter",
+        "size": [1, 1],
+        "ingredients": {
+          "inserter": 1,
+          "iron-plate": 2,
+          "electronic-circuit": 2
+        }
+      },
+      "stack-inserter": {
+        "type": "inserter",
+        "size": [1, 1],
+        "ingredients": {
+          "fast-inserter": 1,
+          "iron-gear-wheel": 15,
+          "electronic-circuit": 15,
+          "advanced-circuit": 1
+        }
+      },
+      "small-electric-pole": {
+        "type": "power",
+        "size": [1, 1],
+        "ingredients": {
+          "wood": 1,
+          "copper-cable": 2
+        }
+      },
+      "medium-electric-pole": {
+        "type": "power",
+        "size": [1, 1],
+        "ingredients": {
+          "steel-plate": 2,
+          "copper-cable": 4
+        }
+      },
+      "big-electric-pole": {
+        "type": "power",
+        "size": [2, 2],
+        "ingredients": {
+          "steel-plate": 5,
+          "copper-cable": 5
+        }
+      },
+      "substation": {
+        "type": "power",
+        "size": [2, 2],
+        "ingredients": {
+          "steel-plate": 10,
+          "advanced-circuit": 5,
+          "copper-cable": 5
+        }
+      }
+    }
+  }
+  

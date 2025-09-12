@@ -1,0 +1,496 @@
+{
+  "recipes": {
+
+
+
+
+    "iron-ore": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "copper-ore": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "coal": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "stone": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "uranium-ore": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "water": {
+      "type": "raw",
+      "ingredients": {}
+    },
+    "crude-oil": {
+      "type": "raw",
+      "ingredients": {}
+    },
+
+
+    "automation-science-pack": {
+      "ingredients": {
+        "copper-plate": 1,
+        "iron-gear-wheel": 1
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+    "logistic-science-pack": {
+      "ingredients": {
+        "transport-belt": 1,
+        "inserter": 1
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+    "military-science-pack": {
+      "ingredients": {
+        "piercing-rounds-magazine": 1,
+        "grenade": 1,
+        "stone-wall": 1
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "chemical-science-pack": {
+      "ingredients": {
+        "sulfur": 1,
+        "advanced-circuit": 3,
+        "engine-unit": 2
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "production-science-pack": {
+      "ingredients": {
+        "electric-furnace": 1,
+        "productivity-module": 1,
+        "rail": 30
+      },
+      "machine": "assembling-machine-3",
+      "machine_size": [3, 3],
+      "crafting_speed": 1.25
+    },
+    "utility-science-pack": {
+      "ingredients": {
+        "processing-unit": 2,
+        "flying-robot-frame": 1,
+        "low-density-structure": 3
+      },
+      "machine": "assembling-machine-3",
+      "machine_size": [3, 3],
+      "crafting_speed": 1.25
+    },
+    "space-science-pack": {
+      "ingredients": {
+        "rocket-part": 1
+      },
+      "machine": "rocket-silo",
+      "machine_size": [9, 9],
+      "crafting_speed": 1.0
+    },
+
+
+
+    "assembling-machine-1": {
+      "ingredients": {
+        "iron-gear-wheel": 3,
+        "electronic-circuit": 3,
+        "iron-plate": 9
+      },
+      "machine": null,
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+    "assembling-machine-2": {
+      "ingredients": {
+        "iron-gear-wheel": 5,
+        "electronic-circuit": 3,
+        "steel-plate": 9
+      },
+      "machine": null,
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "assembling-machine-3": {
+      "ingredients": {
+        "speed-module": 4,
+        "assembling-machine-2": 1
+      },
+      "machine": null,
+      "machine_size": [3, 3],
+      "crafting_speed": 1.25
+    },
+
+
+
+
+
+
+    "stone-furnace": {
+                      "ingredients": {
+                        "stone": 5
+                                      },
+                                        "machine": null,
+                                        "machine_size": [2, 2],
+                                        "crafting_speed": 1.0
+                                      },
+    "steel-furnace": {
+                        "ingredients": {
+                          "steel-plate": 6,
+                          "stone-brick": 10
+                        },
+                        "machine": null,
+                        "machine_size": [2, 2],
+                        "crafting_speed": 2.0
+                      },
+
+    "electric-furnace": {
+                        "ingredients": {
+                                          "steel-plate": 10,
+                                          "advanced-circuit": 5,
+                                          "stone-brick": 10
+                                        },
+                        "machine": null,
+                        "machine_size": [3, 3],
+                        "crafting_speed": 2.0
+                      },
+    
+    
+    "transport-belt": {
+        "ingredients": {
+          "iron-plate": 1,
+          "iron-gear-wheel": 1
+        },
+        "machine": "assembling-machine-1",
+        "machine_size": [1,1],
+        "crafting_speed": 0.5,
+        "belt_speed": 15  
+      },
+      "fast-transport-belt": {
+        "ingredients": {
+          "transport-belt": 1,
+          "iron-gear-wheel": 5
+        },
+        "machine": "assembling-machine-2",
+        "machine_size": [1,1],
+        "crafting_speed": 0.75,
+        "belt_speed": 30  
+      },
+      "express-transport-belt": {
+        "ingredients": {
+          "fast-transport-belt": 1,
+          "iron-gear-wheel": 10,
+          "lubricant": 1
+        },
+        "machine": "assembling-machine-2",
+        "machine_size": [1,1],
+        "crafting_speed": 0.75,
+        "belt_speed": 45 
+      },
+      "underground-belt": {
+        "type": "solid",
+        "machine": "assembling-machine-1",
+        "machine_size": [1,1],
+        "crafting_time": 0.5,
+        "underground_distance": 4,
+        "belt_speed": 15  
+      },
+      "fast-underground-belt": {
+        "type": "solid",
+        "machine": "assembling-machine-2",
+        "machine_size": [1,1],
+        "crafting_time": 0.5,
+        "underground_distance": 6,
+        "belt_speed": 30 
+      },
+      "express-underground-belt": {
+        "type": "solid",
+        "machine": "assembling-machine-3",
+        "machine_size": [1,1],
+        "crafting_time": 0.5,
+        "underground_distance": 8,
+        "belt_speed": 45 
+      },
+      "pipe": {
+        "type": "liquid",
+        "machine": "assembling-machine-1",
+        "machine_size": [1,1],
+        "crafting_time": 0.5,
+        "underground_distance": 9,
+        "belt_speed": null 
+      },
+      "splitter": {
+        "ingredients": {
+          "iron-plate": 5,
+          "iron-gear-wheel": 5,
+          "electronic-circuit": 2
+        },
+        "machine": "assembling-machine-1",
+        "machine_size": [1, 2],
+        "crafting_speed": 0.5,
+        "belt_speed": 15 
+      },
+      "fast-splitter": {
+        "ingredients": {
+          "splitter": 1,
+          "iron-gear-wheel": 10,
+          "electronic-circuit": 10
+        },
+        "machine": "assembling-machine-2",
+        "machine_size": [1, 2],
+        "crafting_speed": 0.75,
+        "belt_speed": 30  
+      },
+      "express-splitter": {
+        "ingredients": {
+          "fast-splitter": 1,
+          "iron-gear-wheel": 10,
+          "lubricant": 1
+        },
+        "machine": "assembling-machine-2",
+        "machine_size": [1, 2],
+        "crafting_speed": 0.75,
+        "belt_speed": 45  
+      },
+
+   
+    
+    "inserter": {
+      "ingredients": {
+        "iron-plate": 1,
+        "iron-gear-wheel": 1,
+        "electronic-circuit": 1
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1,1],
+      "crafting_speed": 0.5
+    },
+    "fast-inserter": {
+      "ingredients": {
+        "inserter": 1,
+        "iron-plate": 2,
+        "electronic-circuit": 2
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1,1],
+      "crafting_speed": 0.5
+    },
+    "stack-inserter": {
+      "ingredients": {
+        "fast-inserter": 1,
+        "iron-gear-wheel": 15,
+        "electronic-circuit": 15,
+        "advanced-circuit": 1
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [1,1],
+      "crafting_speed": 0.75
+    },
+    "small-electric-pole": {
+      "ingredients": {
+        "wood": 1,
+        "copper-cable": 2
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1,1],
+      "crafting_speed": 0.5,
+      "max_coverage": 7
+    },
+    "medium-electric-pole": {
+      "ingredients": {
+        "steel-plate": 2,
+        "copper-cable": 4
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1,1],
+      "crafting_speed": 0.5,
+      "max_coverage": 9
+    },
+    "big-electric-pole": {
+      "ingredients": {
+        "steel-plate": 5,
+        "copper-cable": 5
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75,
+      "max_coverage": 30
+    },
+    "substation": {
+      "ingredients": {
+        "steel-plate": 10,
+        "advanced-circuit": 5,
+        "copper-cable": 5
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75,
+      "max_coverage": 18
+    },
+    "solar-panel": {
+      "ingredients": {
+        "steel-plate": 5,
+        "electronic-circuit": 15,
+        "copper-plate": 5
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "accumulator": {
+      "ingredients": {
+        "iron-plate": 2,
+        "battery": 5
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "boiler": {
+      "ingredients": {
+        "steel-plate": 4,
+        "pipe": 4
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+    "steam-engine": {
+      "ingredients": {
+        "iron-gear-wheel": 8,
+        "pipe": 5,
+        "iron-plate": 10
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+    "nuclear-reactor": {
+      "ingredients": {
+        "concrete": 500,
+        "steel-plate": 500,
+        "advanced-circuit": 500,
+        "copper-plate": 500
+      },
+      "machine": null,
+      "machine_size": [5, 5],
+      "crafting_speed": null
+    },
+    "centrifuge": {
+      "ingredients": {
+        "steel-plate": 100,
+        "advanced-circuit": 50,
+        "concrete": 100
+      },
+      "machine": null,
+      "machine_size": [3, 3],
+      "crafting_speed": null
+    },
+    "heat-exchanger": {
+      "ingredients": {
+        "steel-plate": 10,
+        "copper-plate": 100,
+        "pipe": 10
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.75
+    },
+    "steam-turbine": {
+      "ingredients": {
+        "iron-gear-wheel": 50,
+        "copper-plate": 50,
+        "pipe": 20
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [3, 5],
+      "crafting_speed": 0.75
+    },
+  
+    "copper-plate": {
+      "ingredients": {
+        "copper-ore": 1
+      },
+      "machine": "stone-furnace",
+      "machine_size": [2, 2],
+      "crafting_speed": 1.0
+    },
+    "copper-cable": {
+      "ingredients": {
+        "copper-plate": 1
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1, 1],
+      "crafting_speed": 0.5
+      },
+    "iron-plate": {
+      "ingredients": {
+        "iron-ore": 1
+      },
+      "machine": "stone-furnace",
+      "machine_size": [2, 2],
+      "crafting_speed": 1.0
+    },
+    "iron-gear-wheel": {
+      "ingredients": {
+        "iron-plate": 2
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [3, 3],
+      "crafting_speed": 0.5
+    },
+
+  
+  
+
+
+
+    "oil-refinery": {
+      "type": "machine",
+      "machine": "oil-refinery",
+      "machine_size": [5, 5],
+      "crafting_time": 10,
+      "machine_speed": 1.0,
+      "liquid_inputs": [
+        {"x": 2, "y": 0},
+        {"x": -2, "y": 0}
+      ],
+      "liquid_outputs": [
+        {"x": 0, "y": -2},
+        {"x": 1, "y": -2},
+        {"x": -1, "y": -2}
+      ]
+    },
+    "chemical-plant": {
+      "type": "machine",
+      "machine": "chemical-plant",
+      "machine_size": [3, 3],
+      "crafting_time": 5,
+      "machine_speed": 1.25,
+      "liquid_inputs": [
+        {"x": 1, "y": 0},
+        {"x": -1, "y": 0}
+      ],
+      "liquid_outputs": [
+        {"x": 0, "y": 1},
+        {"x": 0, "y": -1}
+      ]
+    }
+  }
+
+
+
+}
+
