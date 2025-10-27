@@ -1,0 +1,42 @@
+# Virtual Environment
+factorio_venv/
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Extracted game assets (copyrighted, not for distribution)
+SpriteSheets/
+extracted_sprites/
+
+# User configuration
+config.json
+
+
+*.pyc
+

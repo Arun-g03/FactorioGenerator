@@ -1,7 +1,7 @@
 import random
 import logging
 import json
-from blueprintEncoder import encode_blueprint
+from core.blueprintEncoder import encode_blueprint
 
 class ContinuousBeltPlacer:
     def __init__(self, recipes_file, grid_width=20, grid_height=20):

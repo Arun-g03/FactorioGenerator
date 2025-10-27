@@ -1,6 +1,5 @@
 import logging
-from entity import Entity
-from constants import plot_grid_state
+from core.entity import Entity
 
 class BeltRouter:
     def __init__(self, grid, pathfinder):

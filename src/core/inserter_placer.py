@@ -1,5 +1,5 @@
 import logging
-from entity import Entity
+from core.entity import Entity
 
 class InserterPlacer:
     def __init__(self, grid):
