@@ -1,5 +1,25 @@
+from enum import Enum
+
 # Production targets and planner logic use items per minute ("min") or per second ("sec").
 PRODUCTION_RATE_UNIT = "min"
+
+
+class GenerationMode(Enum):
+    """How far upstream to build when generating a blueprint."""
+
+    ASSEMBLER_ONLY = "assembler_only"
+    FULL_CHAIN = "full_chain"
+
+
+class PlacementStrategy(Enum):
+    """How machine positions are chosen on the grid."""
+
+    RULE_BASED = "rule_based"
+    GENETIC = "genetic"
+
+
+# Yellow transport belt: 15 items/s
+TRANSPORT_BELT_THROUGHPUT_PER_MIN = 15 * 60
 
 PRODUCTION_TARGETS = {
    "iron-plate": 20  # items per minute
@@ -13,11 +33,31 @@ def production_rate_suffix():
 BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone"}
 
 DIRECTIONS = {
-    "north": None,  # No direction needed for North (upward)
-    "east": 4,      # Right-facing
-    "south": 8,     # Downward-facing
-    "west": 12       # Left-facing
+    "north": 0,
+    "east": 4,
+    "south": 8,
+    "west": 12,
 }
+
+FACTORIO_NORTH = 0
+FACTORIO_EAST = 4
+FACTORIO_SOUTH = 8
+FACTORIO_WEST = 12
+
+
+def direction_for_flow(from_pos, to_pos):
+    """Factorio entity direction for belt/inserter flow from one tile toward another."""
+    fx, fy = from_pos
+    tx, ty = to_pos
+    if tx > fx:
+        return FACTORIO_EAST
+    if tx < fx:
+        return FACTORIO_WEST
+    if ty > fy:
+        return FACTORIO_SOUTH
+    if ty < fy:
+        return FACTORIO_NORTH
+    return FACTORIO_EAST
 
 # Pygame visualization settings
 PYGAME_WINDOW_WIDTH = 1280

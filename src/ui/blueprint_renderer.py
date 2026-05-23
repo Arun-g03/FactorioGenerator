@@ -6,7 +6,12 @@ from sprite_mapper import SpriteMapper
 from screen_manager import ScreenManager
 from toolbar import Toolbar
 from recipe_panel import RecipePanel
-from core.constants import PYGAME_WINDOW_WIDTH, PYGAME_WINDOW_HEIGHT, PYGAME_TILE_SIZE
+from core.constants import (
+    PYGAME_WINDOW_WIDTH,
+    PYGAME_WINDOW_HEIGHT,
+    PYGAME_TILE_SIZE,
+    PlacementStrategy,
+)
 
 class BlueprintRenderer:
     """
@@ -46,8 +51,11 @@ class BlueprintRenderer:
         self.recipe_panel = None
         self.show_recipe_panel = False
         self.production_stages = []
+        self.rate_summary = []
         self.entities = []
         self._recipes_data = None
+        self._generation_mode = None
+        self.placement_strategy = PlacementStrategy.RULE_BASED
     
     def calculate_bounds(self, entities):
         """Calculate the bounding box for all entities."""
@@ -318,8 +326,6 @@ class BlueprintRenderer:
                     if self.toolbar:
                         toolbar_action = self.toolbar.handle_click(mouse_pos)
                         if toolbar_action:
-                            if toolbar_action == "recipes":
-                                return "targets"
                             return toolbar_action
                     
                     self.dragging = True
@@ -352,6 +358,8 @@ class BlueprintRenderer:
                         self.paused = True
                 elif event.key == pygame.K_t and not self.paused:
                     return "targets"
+                elif event.key == pygame.K_g and not self.paused:
+                    return "generate"
                 elif event.key == pygame.K_s and self._workspace_interactive():
                     self.save_screenshot()
                 elif event.key == pygame.K_r and self._workspace_interactive():
@@ -383,8 +391,7 @@ class BlueprintRenderer:
             self.show_recipe_panel = False
             return
         if result == "generate":
-            targets = self.recipe_panel.get_recipes()
-            if self._generate_from_targets(targets):
+            if self._generate_from_targets(self.recipe_panel.get_generation_config()):
                 self.show_recipe_panel = False
         return
     
@@ -459,6 +466,7 @@ class BlueprintRenderer:
             self.entities = gen_result.blueprint.get("blueprint", {}).get("entities", [])
             self.blueprint_string = gen_result.blueprint_string
             self.production_stages = gen_result.production_stages
+            self.rate_summary = gen_result.rate_summary
         else:
             blueprint = gen_result
             self.entities = blueprint.get("blueprint", {}).get("entities", [])
@@ -470,21 +478,61 @@ class BlueprintRenderer:
         if self.entities:
             self.initialize_screen(self.entities)
 
-    def _generate_from_targets(self, targets):
+    def _get_generation_config(self):
+        """Current targets, chain mode, and placement strategy."""
+        from core.constants import GenerationMode
+
+        if self.recipe_panel is None:
+            self.recipe_panel = RecipePanel()
+        config = self.recipe_panel.get_generation_config()
+        config["placement"] = self.placement_strategy
+        if config.get("mode") is None:
+            config["mode"] = self._generation_mode or GenerationMode.ASSEMBLER_ONLY
+        return config
+
+    def _toggle_placement_strategy(self):
+        if self.placement_strategy == PlacementStrategy.RULE_BASED:
+            self.placement_strategy = PlacementStrategy.GENETIC
+            self.logger.info("Placement strategy: genetic")
+        else:
+            self.placement_strategy = PlacementStrategy.RULE_BASED
+            self.logger.info("Placement strategy: rule-based")
+
+    def _generate_from_targets(self, config=None):
         """Run the generation pipeline and update the workspace."""
+        from core.constants import GenerationMode
         from core.pipeline import GenerationStage, run_generation_pipeline
+
+        if config is None:
+            config = self._get_generation_config()
+        elif isinstance(config, dict) and "placement" not in config:
+            config = {**config, "placement": self.placement_strategy}
+
+        if isinstance(config, dict):
+            targets = config.get("targets", {})
+            mode = config.get("mode", GenerationMode.ASSEMBLER_ONLY)
+            placement = config.get("placement", self.placement_strategy)
+        else:
+            targets = config
+            mode = self._generation_mode or GenerationMode.ASSEMBLER_ONLY
+            placement = self.placement_strategy
 
         if not targets:
             self.logger.warning("No production targets set.")
             return False
 
-        gen_result = run_generation_pipeline(targets, self._recipes_data)
+        self._generation_mode = mode
+        self.placement_strategy = placement
+        gen_result = run_generation_pipeline(
+            targets, self._recipes_data, mode, placement
+        )
         self.load_blueprint(gen_result)
         self.logger.info(
-            "[%s] %s entities, %s production stage(s)",
+            "[%s] %s entities, %s stage(s), placement=%s",
             GenerationStage.VISUALIZE,
             gen_result.entity_count,
             len(gen_result.production_stages),
+            placement.value,
         )
         return True
 
@@ -514,9 +562,11 @@ class BlueprintRenderer:
         self.entities = []
         self.blueprint_string = None
         self.production_stages = []
+        self.rate_summary = []
         self.show_recipe_panel = open_targets_modal
         self.paused = False
         self._reset_camera()
+        self.toolbar.placement_strategy = self.placement_strategy
 
         while True:
             action = self.handle_events()
@@ -527,6 +577,12 @@ class BlueprintRenderer:
                 return "exit"
             if action == "targets":
                 self._open_targets_modal()
+            elif action == "generate":
+                if not self._generate_from_targets():
+                    self._open_targets_modal()
+            elif action == "placement":
+                self._toggle_placement_strategy()
+                self.toolbar.placement_strategy = self.placement_strategy
             elif action == "copy":
                 if self.blueprint_string:
                     self.toolbar.copy_to_clipboard(self.blueprint_string)
@@ -561,18 +617,19 @@ class BlueprintRenderer:
             self._draw_empty_hint()
 
         if self.toolbar:
+            self.toolbar.placement_strategy = self.placement_strategy
             self.toolbar.draw(self.screen)
 
     def _draw_empty_hint(self):
         """Hint shown on an empty workspace before the first generation."""
         font = pygame.font.Font(None, 36)
         hint = font.render(
-            "Set production targets and click Generate",
+            "Set targets, then Generate (toolbar or G)",
             True,
             (160, 160, 170),
         )
         sub = pygame.font.Font(None, 24).render(
-            "Toolbar: Set Targets  |  Scroll to zoom, drag to pan",
+            "Toggle Place: Rules / Genetic  |  T=targets  |  Scroll zoom, drag pan",
             True,
             (120, 120, 130),
         )
@@ -607,31 +664,46 @@ class BlueprintRenderer:
     def _draw_ui_info(self, entity_count):
         """Draw UI information overlay."""
         font = pygame.font.Font(None, 24)
+        small = pygame.font.Font(None, 20)
         
-        # Create info text
         legend = "Green=Input, Red=Output | "
         stage_count = len(self.production_stages)
         info_text = (
             f"{legend}Entities: {entity_count} | Stages: {stage_count} | "
             f"Zoom: {self.zoom:.2f}x"
         )
-        controls = "T=Targets | Scroll=Zoom | Drag=Pan | S=Save | R=Reset | ESC=Pause"
-        
-        # Draw semi-transparent background for text
-        text_surface = font.render(info_text, True, (255, 255, 255))
-        controls_surface = font.render(controls, True, (200, 200, 200))
-        
-        text_rect = text_surface.get_rect()
-        
-        # Draw background rectangle for first line
-        pygame.draw.rect(self.screen, (0, 0, 0, 200), 
-                       (0, 0, text_rect.width + 10, text_rect.height + 10))
-        pygame.draw.rect(self.screen, (0, 0, 0, 200), 
-                       (0, text_rect.height + 5, controls_surface.get_width() + 10, text_rect.height + 10))
-        
-        # Draw text
-        self.screen.blit(text_surface, (5, 5))
-        self.screen.blit(controls_surface, (5, text_rect.height + 10))
+        placement_label = (
+            "Genetic" if self.placement_strategy == PlacementStrategy.GENETIC else "Rules"
+        )
+        controls = (
+            f"G=Generate | Place:{placement_label} | T=Targets | "
+            "Scroll=Zoom | Drag=Pan | ESC=Pause"
+        )
+
+        lines = [info_text, controls]
+        for line in self.rate_summary[:4]:
+            name = line.item.replace("-", " ")
+            text = (
+                f"{name}: {line.requested:.0f} req, {line.achieved:.1f} achieved "
+                f"({line.machine_count} machines)"
+            )
+            if line.warning:
+                text += f" [{line.warning}]"
+            lines.append(text)
+
+        y = 5
+        max_w = 0
+        surfaces = []
+        for i, text in enumerate(lines):
+            surf = (font if i < 2 else small).render(text, True, (255, 255, 220) if i >= 2 and "[" in text else (255, 255, 255) if i < 2 else (200, 200, 200))
+            surfaces.append(surf)
+            max_w = max(max_w, surf.get_width())
+
+        total_h = sum(s.get_height() + 4 for s in surfaces)
+        pygame.draw.rect(self.screen, (0, 0, 0), (0, 0, max_w + 12, total_h + 8))
+        for surf in surfaces:
+            self.screen.blit(surf, (6, y))
+            y += surf.get_height() + 4
     
     def _draw_pause_menu(self):
         """Draw the pause menu overlay."""

@@ -59,7 +59,7 @@ class MachinePlacement:
 
         # Place inserters with validation
         directions = {
-            "input": {"x_offset": -1, "y_offset": h // 2, "direction": 2},  # East
+            "input": {"x_offset": -1, "y_offset": h // 2, "direction": 4},  # East
             "output": {"x_offset": w, "y_offset": h // 2, "direction": 6},  # West
         }
 

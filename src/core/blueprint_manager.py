@@ -1,41 +1,64 @@
 import logging
 
+from core.constants import GenerationMode, PlacementStrategy, PRODUCTION_TARGETS
+from planners.production_planner import ProductionPlanner
+
 
 class BlueprintManager:
     """Places entities and builds a Factorio blueprint dict."""
 
-    def __init__(self, grid, pathfinder, belt_router, inserter_placer, machine_placer):
+    def __init__(
+        self,
+        grid,
+        pathfinder,
+        belt_router,
+        recipes_data,
+        generation_mode: GenerationMode = GenerationMode.ASSEMBLER_ONLY,
+        placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED,
+    ):
         self.grid = grid
         self.pathfinder = pathfinder
         self.belt_router = belt_router
-        self.inserter_placer = inserter_placer
-        self.machine_placer = machine_placer
+        self.recipes_data = recipes_data
+        self.generation_mode = generation_mode
+        self.placement_strategy = placement_strategy
+        self.planner = None
+        self.rate_summary = []
 
     def generate_blueprint(self):
-        from core.constants import PRODUCTION_TARGETS
+        from core import constants as constants_module
 
-        logging.info("Generating blueprint for production targets...")
+        targets = constants_module.PRODUCTION_TARGETS
+        logging.info(
+            "Generating blueprint for %s (mode=%s, placement=%s)...",
+            targets,
+            self.generation_mode.value,
+            self.placement_strategy.value,
+        )
 
         entities = []
         entity_number = 1
 
-        entity_number = self.machine_placer.place_base_resource_belt(
-            entities, entity_number, "iron-ore"
+        self.planner = ProductionPlanner(
+            self.grid,
+            self.pathfinder,
+            self.belt_router,
+            self.recipes_data,
+            self.generation_mode,
         )
-
-        for target_item, target_rate in PRODUCTION_TARGETS.items():
-            logging.info(
-                "Placing production line for %s at %s/min", target_item, target_rate
+        if self.placement_strategy == PlacementStrategy.GENETIC:
+            entities, entity_number = self.planner.generate_genetic(
+                targets, entities, entity_number
             )
-            entity_number = self.machine_placer.build_connected_production_line(
-                entities, entity_number, target_item, target_rate
+        else:
+            entities, entity_number = self.planner.generate(
+                targets, entities, entity_number
             )
-
-        self.machine_placer.production_map.visualize_map()
-        production_stages = list(self.machine_placer.production_map.production_stages)
+        self.rate_summary = self.planner.rate_summary
+        production_stages = list(self.planner.production_stages)
 
         blueprint = self.create_blueprint(entities)
-        return blueprint, production_stages
+        return blueprint, production_stages, self.rate_summary
 
     def create_blueprint(self, entities):
         return {

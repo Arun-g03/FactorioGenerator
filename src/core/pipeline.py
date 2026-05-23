@@ -6,10 +6,9 @@ from dataclasses import dataclass, field
 from core.grid_env import Grid
 from core.pathfinding import Pathfinder
 from core.belt_router import BeltRouter
-from core.inserter_placer import InserterPlacer
 from core.blueprintEncoder import encode_blueprint
 from core.blueprint_manager import BlueprintManager
-from planners.machine_placer import MachinePlacer
+from core.constants import GenerationMode, PlacementStrategy
 
 
 class GenerationStage:
@@ -30,10 +29,16 @@ class BlueprintGenerationResult:
     blueprint_string: str
     production_stages: list = field(default_factory=list)
     entity_count: int = 0
+    rate_summary: list = field(default_factory=list)
+    placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED
 
     @classmethod
     def from_blueprint(
-        cls, blueprint: dict, blueprint_string: str, production_stages: list | None = None
+        cls,
+        blueprint: dict,
+        blueprint_string: str,
+        production_stages: list | None = None,
+        rate_summary: list | None = None,
     ):
         entities = blueprint.get("blueprint", {}).get("entities", [])
         return cls(
@@ -41,10 +46,16 @@ class BlueprintGenerationResult:
             blueprint_string=blueprint_string,
             production_stages=production_stages or [],
             entity_count=len(entities),
+            rate_summary=rate_summary or [],
         )
 
 
-def run_generation_pipeline(custom_recipes, recipes_data) -> BlueprintGenerationResult:
+def run_generation_pipeline(
+    custom_recipes,
+    recipes_data,
+    generation_mode: GenerationMode = GenerationMode.ASSEMBLER_ONLY,
+    placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED,
+) -> BlueprintGenerationResult:
     """Stages: init → place entities → encode blueprint string."""
     logging.info("[%s] Initializing components...", GenerationStage.INIT)
 
@@ -53,24 +64,30 @@ def run_generation_pipeline(custom_recipes, recipes_data) -> BlueprintGeneration
         constants_module.PRODUCTION_TARGETS = custom_recipes
         logging.info("Production targets: %s", custom_recipes)
 
+    logging.info("Generation mode: %s", generation_mode.value)
+    logging.info("Placement strategy: %s", placement_strategy.value)
+
     grid = Grid()
     pathfinder = Pathfinder(grid)
     belt_router = BeltRouter(grid, pathfinder)
-    inserter_placer = InserterPlacer(grid)
-    machine_placer = MachinePlacer(
-        grid, belt_router, inserter_placer, pathfinder, recipes_data
-    )
     blueprint_manager = BlueprintManager(
-        grid, pathfinder, belt_router, inserter_placer, machine_placer
+        grid,
+        pathfinder,
+        belt_router,
+        recipes_data,
+        generation_mode,
+        placement_strategy,
     )
 
     logging.info("[%s] Placing entities and production stages...", GenerationStage.PLACE)
-    blueprint, production_stages = blueprint_manager.generate_blueprint()
+    blueprint, production_stages, rate_summary = blueprint_manager.generate_blueprint()
 
     logging.info("[%s] Encoding blueprint string...", GenerationStage.ENCODE)
     blueprint_string = encode_blueprint(blueprint)
     logging.info("Blueprint string length: %s characters", len(blueprint_string))
 
-    return BlueprintGenerationResult.from_blueprint(
-        blueprint, blueprint_string, production_stages
+    result = BlueprintGenerationResult.from_blueprint(
+        blueprint, blueprint_string, production_stages, rate_summary
     )
+    result.placement_strategy = placement_strategy
+    return result

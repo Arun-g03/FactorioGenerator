@@ -11,12 +11,12 @@ class SpriteMapper:
     CARDINAL_DIRECTION_SUFFIX = {
         None: "north",
         0: "north",
-        2: "east",   # legacy planner / belt_router
-        4: "east",   # Factorio east
-        6: "west",   # legacy planner / belt_router
-        8: "south",  # Factorio south
+        2: "east",
+        4: "east",
+        6: "west",
+        8: "south",
         10: "west",
-        12: "west",  # Factorio west
+        12: "west",
         14: "north",
     }
 

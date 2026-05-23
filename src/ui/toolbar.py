@@ -1,109 +1,126 @@
 """
 Toolbar component for the blueprint renderer.
-Provides controls for recipes, copying blueprint string, and pause menu.
+Provides controls for targets, generate, placement mode, copy, and pause.
 """
 import pygame
 import logging
-import pyperclip
+
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
+
 
 class Toolbar:
     """Bottom toolbar for blueprint renderer."""
-    
+
     def __init__(self, width, height, y_position):
         self.width = width
         self.toolbar_height = 80
         self.y_position = y_position - self.toolbar_height
         self.logger = logging.getLogger(__name__)
-        
-        # Colors
+
         self.bg_color = (30, 30, 40)
         self.border_color = (100, 100, 120)
         self.button_color = (60, 90, 150)
         self.button_hover_color = (80, 120, 200)
         self.button_text_color = (255, 255, 255)
-        
-        # Fonts
-        self.button_font = pygame.font.Font(None, 28)
-        
-        # Try to initialize pyperclip for clipboard operations
-        try:
-            import pyperclip
-            self.has_clipboard = True
-        except ImportError:
-            self.has_clipboard = False
+        self.generate_color = (50, 130, 50)
+        self.generate_hover_color = (60, 150, 60)
+        self.placement_genetic_color = (120, 80, 140)
+        self.placement_genetic_hover_color = (150, 100, 170)
+
+        self.button_font = pygame.font.Font(None, 24)
+        self.has_clipboard = pyperclip is not None
+        if not self.has_clipboard:
             self.logger.warning("pyperclip not available. Copy button will be disabled.")
-    
+
+        self.placement_strategy = None
+
     def draw(self, screen):
-        """Draw the toolbar."""
-        # Draw toolbar background
         toolbar_rect = pygame.Rect(0, self.y_position, self.width, self.toolbar_height)
         pygame.draw.rect(screen, self.bg_color, toolbar_rect)
-        pygame.draw.line(screen, self.border_color, (0, self.y_position), (self.width, self.y_position), 2)
-        
-        # Draw buttons
-        button_x = 20
+        pygame.draw.line(
+            screen, self.border_color, (0, self.y_position), (self.width, self.y_position), 2
+        )
+
         button_y = self.y_position + 15
-        button_width = 150
         button_height = 50
-        button_spacing = 20
-        
-        # Buttons
-        self.buttons = {
-            "recipes": pygame.Rect(button_x, button_y, button_width, button_height),
-            "copy": pygame.Rect(button_x + button_width + button_spacing, button_y, button_width, button_height),
-            "pause": pygame.Rect(button_x + (button_width + button_spacing) * 2, button_y, button_width, button_height),
+        button_spacing = 10
+        x = 12
+        button_widths = {
+            "targets": 118,
+            "generate": 100,
+            "placement": 128,
+            "copy": 118,
+            "pause": 100,
         }
-        
-        button_texts = {
-            "recipes": "Set Targets",
-            "copy": "Copy Blueprint",
-            "pause": "Pause Menu",
-        }
-        
-        # Get mouse position for hover effects
+
+        from core.constants import PlacementStrategy
+
+        placement_label = "Rules"
+        if self.placement_strategy == PlacementStrategy.GENETIC:
+            placement_label = "Genetic"
+
+        button_defs = [
+            ("targets", "Set Targets", button_widths["targets"], self.button_color),
+            ("generate", "Generate", button_widths["generate"], self.generate_color),
+            (
+                "placement",
+                f"Place: {placement_label}",
+                button_widths["placement"],
+                self.placement_genetic_color
+                if self.placement_strategy == PlacementStrategy.GENETIC
+                else (70, 85, 100),
+            ),
+            ("copy", "Copy BP", button_widths["copy"], self.button_color),
+            ("pause", "Pause", button_widths["pause"], self.button_color),
+        ]
+
         mouse_pos = pygame.mouse.get_pos()
-        
-        for button_name, button_rect in self.buttons.items():
-            # Skip copy button if clipboard not available
-            if button_name == "copy" and not self.has_clipboard:
+        self.buttons = {}
+
+        for name, label, width, base_color in button_defs:
+            if name == "copy" and not self.has_clipboard:
                 continue
-            
-            # Determine if hovered
-            is_hovered = button_rect.collidepoint(mouse_pos)
-            color = self.button_hover_color if is_hovered else self.button_color
-            
-            # Draw button
-            pygame.draw.rect(screen, color, button_rect, border_radius=5)
-            pygame.draw.rect(screen, (255, 255, 255), button_rect, width=2, border_radius=5)
-            
-            # Button text
-            text = button_texts.get(button_name, button_name)
-            text_surface = self.button_font.render(text, True, self.button_text_color)
-            text_rect = text_surface.get_rect(center=button_rect.center)
-            screen.blit(text_surface, text_rect)
-    
+            rect = pygame.Rect(x, button_y, width, button_height)
+            self.buttons[name] = rect
+            x += width + button_spacing
+
+            is_hovered = rect.collidepoint(mouse_pos)
+            if name == "generate":
+                color = self.generate_hover_color if is_hovered else base_color
+            elif name == "placement":
+                color = (
+                    self.placement_genetic_hover_color
+                    if is_hovered
+                    and self.placement_strategy == PlacementStrategy.GENETIC
+                    else self.placement_genetic_color
+                    if self.placement_strategy == PlacementStrategy.GENETIC
+                    else (90, 105, 120) if is_hovered else base_color
+                )
+            else:
+                color = self.button_hover_color if is_hovered else base_color
+
+            pygame.draw.rect(screen, color, rect, border_radius=5)
+            pygame.draw.rect(screen, (255, 255, 255), rect, width=2, border_radius=5)
+            text_surface = self.button_font.render(label, True, self.button_text_color)
+            screen.blit(text_surface, text_surface.get_rect(center=rect.center))
+
     def handle_click(self, mouse_pos):
-        """Handle click on toolbar.
-        
-        Returns:
-            String indicating action: "recipes", "copy", "pause", or None
-        """
         for button_name, button_rect in self.buttons.items():
             if button_rect.collidepoint(mouse_pos):
                 return button_name
         return None
-    
+
     def copy_to_clipboard(self, text):
-        """Copy text to clipboard."""
         if not self.has_clipboard:
             self.logger.error("Clipboard not available")
             return False
-        
         try:
             pyperclip.copy(text)
             self.logger.info("Copied to clipboard")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to copy to clipboard: {e}")
+            self.logger.error("Failed to copy to clipboard: %s", e)
             return False
-

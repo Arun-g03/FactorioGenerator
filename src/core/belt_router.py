@@ -68,15 +68,8 @@ class BeltRouter:
         return entity_number
 
     def get_direction(self, x, y, next_x, next_y):
-        if next_x > x:
-            return 2  # East
-        elif next_x < x:
-            return 6  # West
-        elif next_y > y:
-            return 4  # South
-        elif next_y < y:
-            return None  # North
-        return None
+        from core.constants import direction_for_flow
+        return direction_for_flow((x, y), (next_x, next_y))
 
     def route_belt_with_splitters(self, entities, entity_number, start_x, start_y, end_x, end_y, resource, use_underground=False):
         """

@@ -425,7 +425,8 @@
       },
       "machine": "stone-furnace",
       "machine_size": [2, 2],
-      "crafting_speed": 1.0
+      "crafting_time": 3.2,
+      "machine_speed": 1.0
     },
     "copper-cable": {
       "ingredients": {
@@ -441,7 +442,8 @@
       },
       "machine": "stone-furnace",
       "machine_size": [2, 2],
-      "crafting_speed": 1.0
+      "crafting_time": 3.2,
+      "machine_speed": 1.0
     },
     "iron-gear-wheel": {
       "ingredients": {

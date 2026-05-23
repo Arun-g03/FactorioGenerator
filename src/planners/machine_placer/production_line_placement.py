@@ -161,7 +161,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": input_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, input_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -174,7 +174,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": inserter_x, "y": inserter_y},
-                "direction": 2  # East (facing machine)
+                "direction": 4  # East (facing machine)
             })
             self.grid.occupy(inserter_x, inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -191,7 +191,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": output_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, output_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -204,7 +204,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": output_inserter_x, "y": output_inserter_y},
-                "direction": 2  # East (facing away from machine, toward output belt)
+                "direction": 4  # East (facing away from machine, toward output belt)
             })
             self.grid.occupy(output_inserter_x, output_inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -250,7 +250,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": input_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, input_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -263,7 +263,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": inserter_x, "y": inserter_y},
-                "direction": 2  # East (facing right toward machine)
+                "direction": 4  # East (facing right toward machine)
             })
             self.grid.occupy(inserter_x, inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -280,7 +280,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": output_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, output_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -293,7 +293,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": output_inserter_x, "y": output_inserter_y},
-                "direction": 2  # East (facing right toward output belt)
+                "direction": 4  # East (facing right toward output belt)
             })
             self.grid.occupy(output_inserter_x, output_inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -332,7 +332,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": input_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, input_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -345,7 +345,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": inserter_x, "y": inserter_y},
-                "direction": 2  # East (facing right toward machine)
+                "direction": 4  # East (facing right toward machine)
             })
             self.grid.occupy(inserter_x, inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -362,7 +362,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": output_belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, output_belt_y, "transport-belt", [1, 1])
                 entity_number += 1
@@ -375,7 +375,7 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": output_inserter_x, "y": output_inserter_y},
-                "direction": 2  # East (facing right toward output belt)
+                "direction": 4  # East (facing right toward output belt)
             })
             self.grid.occupy(output_inserter_x, output_inserter_y, "inserter", [1, 1])
             entity_number += 1
@@ -425,14 +425,14 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "transport-belt",
                 "position": {"x": belt_x, "y": input_belt_y},
-                "direction": 2  # East (flowing right)
+                "direction": 4  # East (flowing right)
             }
             entities.append(belt_entity)
             self.grid.occupy(belt_x, input_belt_y, "transport-belt", [1, 1])
             entity_number += 1
             
             # Add to production map
-            belt_id = self.production_map.add_entity("belt", (belt_x, input_belt_y), {"direction": 2})
+            belt_id = self.production_map.add_entity("belt", (belt_x, input_belt_y), {"direction": 4})
             input_belt_ids.append(belt_id)
         
         # Place input inserter with proper spacing
@@ -446,14 +446,14 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": inserter_x, "y": inserter_y},
-                "direction": 2  # East (facing right toward machine)
+                "direction": 4  # East (facing right toward machine)
             }
             entities.append(inserter_entity)
             self.grid.occupy(inserter_x, inserter_y, "inserter", [1, 1])
             entity_number += 1
             
             # Add to production map
-            inserter_id = self.production_map.add_entity("inserter", (inserter_x, inserter_y), {"direction": 2})
+            inserter_id = self.production_map.add_entity("inserter", (inserter_x, inserter_y), {"direction": 4})
             print(f"Placed input inserter with ID {inserter_id}")
         else:
             print(f"Input inserter position ({inserter_x}, {inserter_y}) is occupied!")
@@ -464,12 +464,12 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "inserter",
                     "position": {"x": alt_x, "y": alt_y},
-                    "direction": 2
+                    "direction": 4
                 }
                 entities.append(inserter_entity)
                 self.grid.occupy(alt_x, alt_y, "inserter", [1, 1])
                 entity_number += 1
-                inserter_id = self.production_map.add_entity("inserter", (alt_x, alt_y), {"direction": 2})
+                inserter_id = self.production_map.add_entity("inserter", (alt_x, alt_y), {"direction": 4})
                 print(f"Placed input inserter at alternative position ({alt_x}, {alt_y}) with ID {inserter_id}")
             else:
                 print("No available position for input inserter!")
@@ -487,14 +487,14 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "transport-belt",
                 "position": {"x": belt_x, "y": output_belt_y},
-                "direction": 2  # East (flowing right)
+                "direction": 4  # East (flowing right)
             }
             entities.append(belt_entity)
             self.grid.occupy(belt_x, output_belt_y, "transport-belt", [1, 1])
             entity_number += 1
             
             # Add to production map
-            belt_id = self.production_map.add_entity("belt", (belt_x, output_belt_y), {"direction": 2})
+            belt_id = self.production_map.add_entity("belt", (belt_x, output_belt_y), {"direction": 4})
             output_belt_ids.append(belt_id)
         
         # Place output inserter
@@ -506,14 +506,14 @@ class ProductionLinePlacement:
                 "entity_number": entity_number,
                 "name": "inserter",
                 "position": {"x": output_inserter_x, "y": output_inserter_y},
-                "direction": 2  # East (facing right toward output belt)
+                "direction": 4  # East (facing right toward output belt)
             }
             entities.append(output_inserter_entity)
             self.grid.occupy(output_inserter_x, output_inserter_y, "inserter", [1, 1])
             entity_number += 1
             
             # Add to production map
-            output_inserter_id = self.production_map.add_entity("inserter", (output_inserter_x, output_inserter_y), {"direction": 2})
+            output_inserter_id = self.production_map.add_entity("inserter", (output_inserter_x, output_inserter_y), {"direction": 4})
             print(f"Placed output inserter with ID {output_inserter_id}")
         else:
             print(f"Output inserter position ({output_inserter_x}, {output_inserter_y}) is occupied!")
@@ -524,12 +524,12 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "inserter",
                     "position": {"x": alt_x, "y": alt_y},
-                    "direction": 2
+                    "direction": 4
                 }
                 entities.append(output_inserter_entity)
                 self.grid.occupy(alt_x, alt_y, "inserter", [1, 1])
                 entity_number += 1
-                output_inserter_id = self.production_map.add_entity("inserter", (alt_x, alt_y), {"direction": 2})
+                output_inserter_id = self.production_map.add_entity("inserter", (alt_x, alt_y), {"direction": 4})
                 print(f"Placed output inserter at alternative position ({alt_x}, {alt_y}) with ID {output_inserter_id}")
             else:
                 print("No available position for output inserter!")
@@ -577,7 +577,7 @@ class ProductionLinePlacement:
                     "entity_number": entity_number,
                     "name": "transport-belt",
                     "position": {"x": belt_x, "y": belt_y},
-                    "direction": 2  # East (flowing right)
+                    "direction": 4  # East (flowing right)
                 })
                 self.grid.occupy(belt_x, belt_y, "transport-belt", [1, 1])
                 entity_number += 1
