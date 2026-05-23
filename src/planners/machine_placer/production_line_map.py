@@ -1,3 +1,6 @@
+import logging
+
+
 class ProductionLineMap:
     """
     A better representation of the production line structure that tracks:
@@ -7,6 +10,7 @@ class ProductionLineMap:
     - The logical structure of the production line
     """
     def __init__(self):
+        self.logger = logging.getLogger(__name__)
         self.entities = {}  # entity_id -> entity_data
         self.connections = {}  # entity_id -> [connected_entity_ids]
         self.resource_flows = {}  # resource_name -> [entity_ids that produce/consume it]
@@ -80,13 +84,19 @@ class ProductionLineMap:
         # Check if any existing entity is at this position
         for entity in self.entities.values():
             if entity['position'] == (x, y):
-                print(f"Position ({x}, {y}) occupied by {entity['type']} (ID: {entity['id']})")
+                self.logger.debug(
+                    "Position (%s, %s) occupied by %s (ID: %s)",
+                    x, y, entity['type'], entity['id'],
+                )
                 return False
         return True
     
     def find_alternative_position(self, preferred_x, preferred_y, entity_type="entity", max_attempts=5):
         """Find an alternative position near the preferred position"""
-        print(f"Looking for alternative position for {entity_type} near ({preferred_x}, {preferred_y})")
+        self.logger.debug(
+            "Looking for alternative position for %s near (%s, %s)",
+            entity_type, preferred_x, preferred_y,
+        )
         
         # Try positions in a spiral pattern around the preferred position
         for radius in range(1, max_attempts + 1):
@@ -96,70 +106,64 @@ class ProductionLineMap:
                         new_x = preferred_x + dx
                         new_y = preferred_y + dy
                         if self.is_position_available(new_x, new_y, entity_type):
-                            print(f"Found alternative position: ({new_x}, {new_y})")
+                            self.logger.debug("Found alternative position: (%s, %s)", new_x, new_y)
                             return new_x, new_y
         
-        print(f"No alternative position found for {entity_type}")
+        self.logger.warning("No alternative position found for %s", entity_type)
         return None, None
     
     def visualize_map(self):
-        """Visualize the current production line map structure"""
-        print("\n=== PRODUCTION LINE MAP ===")
-        print(f"Total entities: {len(self.entities)}")
-        print(f"Total stages: {len(self.production_stages)}")
-        print(f"Resource flows: {list(self.resource_flows.keys())}")
-        
-        print("\n--- PRODUCTION STAGES ---")
+        """Log the current production line map structure (generation stage summary)."""
+        self.logger.info("=== PRODUCTION LINE MAP ===")
+        self.logger.info("Total entities: %s", len(self.entities))
+        self.logger.info("Total stages: %s", len(self.production_stages))
+        self.logger.info("Resource flows: %s", list(self.resource_flows.keys()))
+
         for i, stage in enumerate(self.production_stages):
-            print(f"Stage {i+1}: {stage['type']} at {stage['position']}")
-        
-        print("\n--- ENTITY CONNECTIONS ---")
+            self.logger.info(
+                "Stage %s: %s at %s",
+                i + 1, stage['type'], stage['position'],
+            )
+
         for entity_id, connections in self.connections.items():
             entity = self.entities[entity_id]
-            print(f"Entity {entity_id} ({entity['type']}) at {entity['position']} -> {connections}")
-        
-        print("\n--- RESOURCE FLOWS ---")
+            self.logger.debug(
+                "Entity %s (%s) at %s -> %s",
+                entity_id, entity['type'], entity['position'], connections,
+            )
+
         for resource, entity_ids in self.resource_flows.items():
-            print(f"{resource}: {entity_ids}")
-        
-        print("\n--- SPATIAL LAYOUT ---")
-        self.print_spatial_layout()
-        print("=" * 30)
+            self.logger.debug("Flow %s: %s", resource, entity_ids)
+
+        self._log_spatial_layout()
     
-    def print_spatial_layout(self):
-        """Print a simple ASCII representation of the spatial layout"""
-        # Find bounds
+    def _log_spatial_layout(self):
+        """Log a simple ASCII representation of the spatial layout."""
         if not self.entities:
-            print("No entities placed yet")
+            self.logger.info("Spatial layout: no entities placed yet")
             return
-            
+
         min_x = min(entity['position'][0] for entity in self.entities.values())
         max_x = max(entity['position'][0] for entity in self.entities.values())
         min_y = min(entity['position'][1] for entity in self.entities.values())
         max_y = max(entity['position'][1] for entity in self.entities.values())
-        
-        print(f"Layout bounds: ({min_x}, {min_y}) to ({max_x}, {max_y})")
-        
-        # Create a simple grid representation
+        self.logger.info("Layout bounds: (%s, %s) to (%s, %s)", min_x, min_y, max_x, max_y)
+
         for y in range(min_y, max_y + 1):
             row = f"Y{y:2d}: "
             for x in range(min_x, max_x + 1):
-                # Find entity at this position
-                entity_here = None
-                for entity in self.entities.values():
-                    if entity['position'] == (x, y):
-                        entity_here = entity
-                        break
-                
+                entity_here = next(
+                    (e for e in self.entities.values() if e['position'] == (x, y)),
+                    None,
+                )
                 if entity_here:
-                    if entity_here['type'] == 'machine':
-                        row += "M"
-                    elif entity_here['type'] == 'belt':
-                        row += "B"
-                    elif entity_here['type'] == 'inserter':
-                        row += "I"
-                    else:
-                        row += "?"
+                    row += {"machine": "M", "belt": "B", "inserter": "I"}.get(
+                        entity_here['type'], "?"
+                    )
                 else:
                     row += "."
-            print(row)
+            self.logger.info(row)
+    
+    def print_spatial_layout(self):
+        """Backward-compatible alias for console debugging."""
+        self._log_spatial_layout()

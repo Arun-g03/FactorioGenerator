@@ -1,4 +1,3 @@
-import os
 import pygame
 import logging
 from pathlib import Path
@@ -6,183 +5,243 @@ from pathlib import Path
 class SpriteLoader:
     """
     Loads and caches sprites directly from Factorio game installation.
-    Handles both individual sprite files and sprite sheets that need to be split.
+    Handles belt sprite sheets, inserter platform strips, and underground belts.
     """
-    
-    # Sprite sheets that need to be split (entity_name: (grid_rows, grid_cols, sprite_size))
-    SPRITE_SHEETS = {
-        "transport-belt": (20, 16, 64),  # 20 rows, 16 cols, 64x64 pixels per sprite
-        "fast-transport-belt": (20, 16, 64),
-        "express-transport-belt": (20, 16, 64),
+
+    # Belt sheets: row count and column count (sprite size is auto-detected from PNG)
+    BELT_SHEET_LAYOUT = {
+        "transport-belt": (20, 16),
+        "fast-transport-belt": (20, 16),
+        "express-transport-belt": (20, 16),
     }
-    
+
+    BELT_DIRECTION_ROWS = {
+        "east": 0,
+        "west": 1,
+        "north": 2,
+        "south": 3,
+        "east-to-north": 4,
+        "north-to-east": 5,
+        "west-to-north": 6,
+        "north-to-west": 7,
+        "south-to-east": 8,
+        "east-to-south": 9,
+        "south-to-west": 10,
+        "west-to-south": 11,
+    }
+
+    INSERTER_PLATFORM_DIRECTIONS = ("north", "east", "south", "west")
+
     def __init__(self, factorio_graphics_path=None):
-        """
-        Initialize sprite loader.
-        
-        Args:
-            factorio_graphics_path: Path to Factorio graphics/entity directory
-                                   If None, tries to load from constants
-        """
         if factorio_graphics_path is None:
             from core.constants import FACTORIO_BASE_GRAPHICS_PATH
             factorio_graphics_path = FACTORIO_BASE_GRAPHICS_PATH
-        
+
         self.factorio_path = Path(factorio_graphics_path)
         self.sprites = {}
         self.logger = logging.getLogger(__name__)
-        
+
         if not self.factorio_path.exists():
             self.logger.error(f"Factorio graphics path not found: {self.factorio_path}")
-            self.logger.error("Please set FACTORIO_BASE_GRAPHICS_PATH in core/constants.py")
+            self.logger.error("Set FACTORIO_INSTALL_PATH in core/constants.py")
         else:
             self.logger.info(f"Loading sprites from: {self.factorio_path}")
             self._load_all_sprites()
-    
-    def _extract_sprite_from_sheet(self, sheet_surface, row, col, rows, cols, sprite_size):
-        """Extract a single sprite from a sprite sheet."""
-        x = col * sprite_size
-        y = row * sprite_size
-        sprite = pygame.Surface((sprite_size, sprite_size))
-        sprite.blit(sheet_surface, (0, 0), (x, y, sprite_size, sprite_size))
-        sprite.set_colorkey((0, 0, 0))  # Black is transparent
-        return sprite
-    
-    def _load_belt_sheet(self, entity_name, sheet_path):
-        """Load and split belt sprite sheets."""
+
+    def _load_image(self, path):
+        """Load a PNG; use alpha when a display is available."""
+        image = pygame.image.load(str(path))
         try:
-            sheet = pygame.image.load(sheet_path)
-            rows, cols, sprite_size = self.SPRITE_SHEETS[entity_name]
-            
-            # Map of directions for belt sprites (row indices 0-11 in first column)
-            # First 4 are straight directions, next 8 are corners
-            direction_map = {
-                'east': 0,   # Right
-                'west': 1,   # Left
-                'north': 2,  # Up
-                'south': 3,  # Down
-                'east-to-north': 4,
-                'north-to-east': 5,
-                'west-to-north': 6,
-                'north-to-west': 7,
-                'south-to-east': 8,
-                'east-to-south': 9,
-                'south-to-west': 10,
-                'west-to-south': 11,
-            }
-            
-            # Extract sprites from first column (col=0)
-            for direction, row_idx in direction_map.items():
-                sprite = self._extract_sprite_from_sheet(sheet, row_idx, 0, rows, cols, sprite_size)
-                key = f"{entity_name}-{direction}"
-                self.sprites[key] = sprite
-                self.logger.debug(f"Extracted sprite: {key}")
-            
-            self.logger.info(f"Loaded belt sprite sheet: {entity_name} with {len(direction_map)} variations")
-            
+            return image.convert_alpha()
+        except pygame.error:
+            return image
+
+    def _apply_transparency(self, sprite):
+        if sprite.get_flags() & pygame.SRCALPHA:
+            return sprite
+        sprite.set_colorkey((0, 0, 0))
+        return sprite
+
+    def _extract_sprite_from_sheet(self, sheet_surface, row, col, cell_width, cell_height):
+        x = col * cell_width
+        y = row * cell_height
+        sprite = pygame.Surface((cell_width, cell_height), pygame.SRCALPHA)
+        sprite.blit(sheet_surface, (0, 0), (x, y, cell_width, cell_height))
+        return self._apply_transparency(sprite)
+
+    def _detect_sheet_sprite_size(self, sheet, rows, cols):
+        width, height = sheet.get_size()
+        return width // cols, height // rows  # cell_width, cell_height
+
+    def _load_belt_sheet(self, entity_name, sheet_path):
+        try:
+            from core.constants import BELT_ENTITIES
+            if entity_name not in BELT_ENTITIES:
+                return
+
+            sheet = self._load_image(sheet_path)
+            rows, cols = self.BELT_SHEET_LAYOUT[entity_name]
+            cell_width, cell_height = self._detect_sheet_sprite_size(sheet, rows, cols)
+
+            for direction, row_idx in self.BELT_DIRECTION_ROWS.items():
+                sprite = self._extract_sprite_from_sheet(
+                    sheet, row_idx, 0, cell_width, cell_height
+                )
+                self.sprites[f"{entity_name}-{direction}"] = sprite
+
+            self.logger.info(
+                f"Loaded belt sheet {entity_name}: {cell_width}x{cell_height}px sprites, "
+                f"{len(self.BELT_DIRECTION_ROWS)} directions"
+            )
         except Exception as e:
             self.logger.error(f"Failed to load belt sprite sheet {entity_name}: {e}")
-    
+
+    def _load_inserter_sprites(self, entity_name, entity_path):
+        platform_file = entity_path / f"{entity_name}-platform.png"
+        if not platform_file.exists():
+            self.logger.warning(f"No platform sprite for {entity_name}")
+            return False
+
+        try:
+            sheet = self._load_image(platform_file)
+            width, height = sheet.get_size()
+            frame_count = len(self.INSERTER_PLATFORM_DIRECTIONS)
+
+            if width >= height * frame_count:
+                frame_width = width // frame_count
+                for index, direction in enumerate(self.INSERTER_PLATFORM_DIRECTIONS):
+                    frame = pygame.Surface((frame_width, height), pygame.SRCALPHA)
+                    frame.blit(sheet, (0, 0), (index * frame_width, 0, frame_width, height))
+                    self.sprites[f"{entity_name}-platform-{direction}"] = self._apply_transparency(frame)
+                default = f"{entity_name}-platform-east"
+                self.sprites[f"{entity_name}-platform"] = self.sprites[default]
+            else:
+                self.sprites[f"{entity_name}-platform"] = self._apply_transparency(sheet)
+
+            self.logger.info(f"Loaded inserter sprites for {entity_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load inserter sprites for {entity_name}: {e}")
+            return False
+
+    def _load_underground_belt(self, entity_name, entity_path):
+        structure_file = entity_path / f"{entity_name}-structure.png"
+        if not structure_file.exists():
+            return False
+
+        try:
+            sheet = self._load_image(structure_file)
+            width, height = sheet.get_size()
+            # Structure PNGs are sprite sheets (e.g. 768x768); use one tile for display
+            cell_size = 128 if width >= 128 and height >= 128 else min(width, height)
+            if width > cell_size or height > cell_size:
+                sprite = pygame.Surface((cell_size, cell_size), pygame.SRCALPHA)
+                sprite.blit(sheet, (0, 0), (0, 0, cell_size, cell_size))
+                sprite = self._apply_transparency(sprite)
+            else:
+                sprite = self._apply_transparency(sheet)
+            self.sprites[f"{entity_name}-structure"] = sprite
+            self.logger.info(f"Loaded underground belt structure for {entity_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to load underground belt {entity_name}: {e}")
+            return False
+
     def _load_entity_sprite(self, entity_name, entity_path):
-        """Load a sprite from an entity's folder."""
-        # Look for PNG files in the entity folder
         png_files = list(entity_path.glob("*.png"))
-        
         if not png_files:
             self.logger.warning(f"No PNG files found for {entity_name}")
             return False
-        
-        # Try to find a main sprite file
-        # Priority: exact match, then first file that starts with entity_name but isn't a variant
+
         main_sprite = None
-        
-        # First, try exact match
         for sprite_file in png_files:
             if sprite_file.stem == entity_name:
                 main_sprite = sprite_file
-                self.logger.debug(f"Found exact match for {entity_name}: {sprite_file.name}")
                 break
-        
-        # If no exact match, look for files starting with entity_name but not being variants
-        # (e.g., stone-furnace.png but not stone-furnace-fire.png)
+
         if main_sprite is None:
             for sprite_file in png_files:
                 sprite_stem = sprite_file.stem
-                
-                # Check if this is a variant (has entity_name followed by a dash and more characters)
-                is_variant = (sprite_stem.startswith(entity_name) and 
-                             len(sprite_stem) > len(entity_name) and
-                             sprite_stem[len(entity_name)] == "-")
-                
+                is_variant = (
+                    sprite_stem.startswith(entity_name)
+                    and len(sprite_stem) > len(entity_name)
+                    and sprite_stem[len(entity_name)] == "-"
+                )
                 if is_variant:
-                    # This is a variant (e.g., stone-furnace-fire), skip it
                     continue
-                
                 if sprite_stem.startswith(entity_name):
                     main_sprite = sprite_file
-                    self.logger.debug(f"Found match for {entity_name}: {sprite_file.name}")
                     break
-        
-        # If still no match, use the first PNG file
+
         if main_sprite is None:
             main_sprite = png_files[0]
-            self.logger.debug(f"Using first available sprite for {entity_name}: {main_sprite.name}")
-        
+
         try:
-            sprite = pygame.image.load(main_sprite)
-            self.sprites[entity_name] = sprite
-            self.logger.debug(f"Loaded sprite: {entity_name} from {main_sprite.name}")
+            sprite = self._load_image(main_sprite)
+            self.sprites[entity_name] = self._apply_transparency(sprite)
             return True
         except Exception as e:
             self.logger.error(f"Failed to load sprite for {entity_name}: {e}")
             return False
-    
+
+    def _is_special_entity(self, entity_name):
+        from core.constants import BELT_ENTITIES, INSERTER_ENTITIES, UNDERGROUND_BELT_ENTITIES
+
+        if entity_name in BELT_ENTITIES or entity_name in UNDERGROUND_BELT_ENTITIES:
+            return True
+        if entity_name in INSERTER_ENTITIES or entity_name.endswith("-inserter"):
+            return True
+        return False
+
     def _load_all_sprites(self):
-        """Load all sprites from the Factorio installation."""
         if not self.factorio_path.exists():
             return
-        
-        # Load belt sprites (which are sprite sheets)
-        for belt_type in self.SPRITE_SHEETS.keys():
+
+        from core.constants import BELT_ENTITIES, INSERTER_ENTITIES, UNDERGROUND_BELT_ENTITIES
+
+        for belt_type in BELT_ENTITIES:
             belt_folder = self.factorio_path / belt_type
-            if belt_folder.exists():
-                # Look for the sheet file
-                sheet_files = list(belt_folder.glob("*belt*.png"))
-                if sheet_files:
-                    self._load_belt_sheet(belt_type, sheet_files[0])
-        
-        # Load other entity sprites
-        # Walk through all entity folders
-        if self.factorio_path.exists():
-            for entity_folder in self.factorio_path.iterdir():
-                if entity_folder.is_dir():
-                    entity_name = entity_folder.name
-                    # Skip belts (already handled)
-                    if entity_name not in self.SPRITE_SHEETS:
-                        self._load_entity_sprite(entity_name, entity_folder)
-        
-        self.logger.info(f"Loaded {len(self.sprites)} sprites")
-    
+            if not belt_folder.exists():
+                continue
+            sheet_files = sorted(belt_folder.glob(f"{belt_type}.png"))
+            if not sheet_files:
+                sheet_files = sorted(belt_folder.glob("*belt*.png"))
+            if sheet_files:
+                self._load_belt_sheet(belt_type, sheet_files[0])
+
+        for entity_name in INSERTER_ENTITIES:
+            entity_path = self.factorio_path / entity_name
+            if entity_path.is_dir():
+                self._load_inserter_sprites(entity_name, entity_path)
+
+        for entity_name in UNDERGROUND_BELT_ENTITIES:
+            entity_path = self.factorio_path / entity_name
+            if entity_path.is_dir():
+                self._load_underground_belt(entity_name, entity_path)
+
+        for entity_folder in self.factorio_path.iterdir():
+            if not entity_folder.is_dir():
+                continue
+            entity_name = entity_folder.name
+            if self._is_special_entity(entity_name):
+                continue
+            self._load_entity_sprite(entity_name, entity_folder)
+
+        belt_count = sum(1 for k in self.sprites if "belt" in k)
+        inserter_count = sum(1 for k in self.sprites if "inserter" in k)
+        self.logger.info(
+            f"Loaded {len(self.sprites)} sprites "
+            f"({belt_count} belt, {inserter_count} inserter)"
+        )
+
     def get_sprite(self, sprite_name):
-        """
-        Get a sprite by name.
-        
-        Args:
-            sprite_name: Name of the sprite (without .png extension)
-        
-        Returns:
-            pygame.Surface if found, None otherwise
-        """
         return self.sprites.get(sprite_name)
-    
+
     def has_sprite(self, sprite_name):
-        """Check if a sprite exists."""
         return sprite_name in self.sprites
-    
+
     def get_sprite_count(self):
-        """Get the total number of loaded sprites."""
         return len(self.sprites)
-    
+
     def list_sprites(self):
-        """List all available sprite names."""
         return list(self.sprites.keys())

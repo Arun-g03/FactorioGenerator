@@ -53,7 +53,7 @@ class MainMenu:
     def setup_menu(self):
         """Set up menu buttons."""
         self.buttons = [
-            {"text": "Generate Blueprint", "action": "generate", "y": 200},
+            {"text": "Start", "action": "generate", "y": 200},
             {"text": "Settings", "action": "settings", "y": 280},
             {"text": "Exit", "action": "exit", "y": 360},
         ]

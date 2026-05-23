@@ -1,3 +1,4 @@
+import math
 import pygame
 import logging
 from sprite_loader import SpriteLoader
@@ -41,9 +42,12 @@ class BlueprintRenderer:
         self.toolbar = None
         self.blueprint_string = None
         
-        # Recipe panel
+        # Recipe panel (modal over workspace)
         self.recipe_panel = None
         self.show_recipe_panel = False
+        self.production_stages = []
+        self.entities = []
+        self._recipes_data = None
     
     def calculate_bounds(self, entities):
         """Calculate the bounding box for all entities."""
@@ -102,10 +106,12 @@ class BlueprintRenderer:
             world_x = 0
             world_y = 0
         
-        screen_x, screen_y = self.world_to_screen(world_x, world_y)
+        tile_screen_x, tile_screen_y = self.world_to_screen(world_x, world_y)
         
-        # Get sprite
-        sprite_name = self.sprite_mapper.get_sprite_name(entity_name, direction)
+        # Get sprite (inserters use base platform; direction shown via arrow overlay)
+        is_inserter = "inserter" in entity_name
+        sprite_direction = None if is_inserter else direction
+        sprite_name = self.sprite_mapper.get_sprite_name(entity_name, sprite_direction)
         sprite = self.sprite_loader.get_sprite(sprite_name)
         
         # If sprite not found, draw a colored rectangle as fallback
@@ -119,29 +125,111 @@ class BlueprintRenderer:
                 color = self._get_color_for_entity(entity_name)
                 scaled_size = int(self.tile_size * self.zoom)
                 pygame.draw.rect(self.screen, color, 
-                               (screen_x, screen_y, scaled_size, scaled_size))
+                               (tile_screen_x, tile_screen_y, scaled_size, scaled_size))
                 self.logger.debug(f"No sprite for {sprite_name}, using fallback")
+                if is_inserter:
+                    self._draw_inserter_direction_arrow(tile_screen_x, tile_screen_y, direction)
                 return
         
-        # Scale and draw sprite
-        if self.zoom != 1.0:
-            sprite_width = int(sprite.get_width() * self.zoom)
-            sprite_height = int(sprite.get_height() * self.zoom)
-            sprite = pygame.transform.scale(sprite, (sprite_width, sprite_height))
-        
-        self.screen.blit(sprite, (screen_x, screen_y))
+        sprite = self._scale_sprite_to_tile(sprite)
+        blit_x, blit_y = self._center_sprite_on_tile(sprite, tile_screen_x, tile_screen_y)
+        self.screen.blit(sprite, (blit_x, blit_y))
+
+        if is_inserter:
+            self._draw_inserter_direction_arrow(tile_screen_x, tile_screen_y, direction)
+
+    def _scale_sprite_to_tile(self, sprite):
+        """Scale a sprite to fit within one tile."""
+        tile = max(1, int(self.tile_size * self.zoom))
+        sw, sh = sprite.get_width(), sprite.get_height()
+        if sw <= 0 or sh <= 0:
+            return sprite
+        scale = min(tile / sw, tile / sh)
+        if abs(scale - 1.0) < 0.01:
+            return sprite
+        return pygame.transform.smoothscale(
+            sprite, (max(1, int(sw * scale)), max(1, int(sh * scale)))
+        )
+
+    def _center_sprite_on_tile(self, sprite, screen_x, screen_y):
+        """Offset blit position so the sprite is centered on its tile."""
+        tile = int(self.tile_size * self.zoom)
+        offset_x = (tile - sprite.get_width()) // 2
+        offset_y = (tile - sprite.get_height()) // 2
+        return screen_x + offset_x, screen_y + offset_y
+
+    def _direction_to_arrow_vector(self, direction):
+        """Map entity direction to a screen-space unit vector (y grows downward)."""
+        suffix = SpriteMapper.CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
+        return {
+            "north": (0, -1),
+            "east": (1, 0),
+            "south": (0, 1),
+            "west": (-1, 0),
+        }.get(suffix, (1, 0))
+
+    def _draw_inserter_direction_arrow(self, tile_screen_x, tile_screen_y, direction):
+        """Draw a direction arrow over an inserter tile."""
+        dx, dy = self._direction_to_arrow_vector(direction)
+        tile = max(4, int(self.tile_size * self.zoom))
+        cx = tile_screen_x + tile // 2
+        cy = tile_screen_y + tile // 2
+
+        shaft_len = max(8, tile // 3)
+        tip_x = cx + dx * shaft_len
+        tip_y = cy + dy * shaft_len
+
+        arrow_color = (255, 255, 255)
+        outline_color = (30, 30, 30)
+        line_width = max(2, int(2 * self.zoom))
+
+        pygame.draw.line(
+            self.screen, outline_color, (cx, cy), (tip_x, tip_y), line_width + 2
+        )
+        pygame.draw.line(
+            self.screen, arrow_color, (cx, cy), (tip_x, tip_y), line_width
+        )
+
+        head_len = max(5, tile // 5)
+        angle = math.atan2(dy, dx)
+        head_spread = math.pi / 7
+        left = (
+            tip_x - head_len * math.cos(angle - head_spread),
+            tip_y - head_len * math.sin(angle - head_spread),
+        )
+        right = (
+            tip_x - head_len * math.cos(angle + head_spread),
+            tip_y - head_len * math.sin(angle + head_spread),
+        )
+        head_points = [(tip_x, tip_y), left, right]
+        pygame.draw.polygon(self.screen, outline_color, head_points)
+        pygame.draw.polygon(self.screen, arrow_color, head_points)
     
     def _find_fallback_sprite(self, entity_name):
         """Try to find a fallback sprite for an entity."""
-        # Try base name without suffixes
+        candidates = [entity_name]
+        if "inserter" in entity_name:
+            candidates.extend([
+                f"{entity_name}-platform-east",
+                f"{entity_name}-platform",
+            ])
+        if "belt" in entity_name:
+            candidates.extend([
+                f"{entity_name}-east",
+                "transport-belt-east",
+            ])
+
+        for name in candidates:
+            sprite = self.sprite_loader.get_sprite(name)
+            if sprite:
+                return sprite
+
         base_parts = entity_name.split('-')
-        if len(base_parts) > 1:
-            # Try different variations
-            for i in range(len(base_parts), 0, -1):
-                partial_name = '-'.join(base_parts[:i])
-                sprite = self.sprite_loader.get_sprite(partial_name)
-                if sprite:
-                    return sprite
+        for i in range(len(base_parts), 0, -1):
+            partial_name = '-'.join(base_parts[:i])
+            sprite = self.sprite_loader.get_sprite(partial_name)
+            if sprite:
+                return sprite
         return None
     
     def _get_color_for_entity(self, entity_name):
@@ -186,12 +274,13 @@ class BlueprintRenderer:
         
         Returns:
             "menu" if returning to main menu
-            False if quitting
+            "exit" on window close
+            "targets", "copy", "pause" for toolbar actions
             True to continue
         """
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return "menu"  # Return to menu instead of quitting
+                return "exit"
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
                     mouse_pos = pygame.mouse.get_pos()
@@ -215,97 +304,89 @@ class BlueprintRenderer:
                                     return "menu"
                         continue  # Don't process camera controls
                     
-                    # Check if clicking on recipe panel
+                    # Targets modal captures clicks
                     if self.show_recipe_panel and self.recipe_panel:
                         panel_action = self.recipe_panel.handle_click(mouse_pos)
                         if panel_action:
-                            return self._handle_recipe_panel_action(panel_action)
-                        # Also handle key input for recipe panel
-                        self.recipe_panel.handle_key(event)
+                            self._handle_recipe_panel_action(panel_action)
                         continue
                     
+                    if not self._workspace_interactive():
+                        continue
+
                     # Check if clicking on toolbar
                     if self.toolbar:
                         toolbar_action = self.toolbar.handle_click(mouse_pos)
                         if toolbar_action:
+                            if toolbar_action == "recipes":
+                                return "targets"
                             return toolbar_action
                     
                     self.dragging = True
                     self.last_mouse_pos = mouse_pos
                 elif event.button == 4:  # Scroll up
-                    if not self.paused:  # Only zoom when not paused
+                    if self._workspace_interactive():
                         self.zoom *= 1.1
                         self.zoom = min(self.zoom, 3.0)
                 elif event.button == 5:  # Scroll down
-                    if not self.paused:  # Only zoom when not paused
+                    if self._workspace_interactive():
                         self.zoom /= 1.1
                         self.zoom = max(self.zoom, 0.1)
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     self.dragging = False
             elif event.type == pygame.MOUSEMOTION:
-                if self.dragging and not self.paused:  # Only drag camera when not paused
+                if self.dragging and self._workspace_interactive():
                     dx, dy = pygame.mouse.get_pos()
                     self.camera_x += dx - self.last_mouse_pos[0]
                     self.camera_y += dy - self.last_mouse_pos[1]
                     self.last_mouse_pos = (dx, dy)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:  # Pause/unpause
-                    self.paused = not self.paused
-                elif event.key == pygame.K_s:  # Save screenshot
-                    self.save_screenshot()
-                elif event.key == pygame.K_r:  # Reset camera
-                    self._reset_camera()
-                elif event.key == pygame.K_UP:  # Navigate pause menu
-                    if self.paused:
-                        self.pause_selected_button = (self.pause_selected_button - 1) % 2
-                elif event.key == pygame.K_DOWN:  # Navigate pause menu
-                    if self.paused:
-                        self.pause_selected_button = (self.pause_selected_button + 1) % 2
-                elif event.key == pygame.K_RETURN:  # Select in pause menu
-                    if self.paused:
-                        if self.pause_selected_button == 0:  # Resume
-                            self.paused = False
-                        elif self.pause_selected_button == 1:  # Return to menu
-                            return "menu"
-                elif event.key == pygame.K_ESCAPE:  # Close recipe panel
+                if event.key == pygame.K_ESCAPE:
                     if self.show_recipe_panel:
                         self.show_recipe_panel = False
-                        return True
+                        continue
+                    if self.paused:
+                        self.paused = False
+                    else:
+                        self.paused = True
+                elif event.key == pygame.K_t and not self.paused:
+                    return "targets"
+                elif event.key == pygame.K_s and self._workspace_interactive():
+                    self.save_screenshot()
+                elif event.key == pygame.K_r and self._workspace_interactive():
+                    self._reset_camera()
+                elif event.key == pygame.K_UP:
+                    if self.paused:
+                        self.pause_selected_button = (self.pause_selected_button - 1) % 2
+                elif event.key == pygame.K_DOWN:
+                    if self.paused:
+                        self.pause_selected_button = (self.pause_selected_button + 1) % 2
+                elif event.key == pygame.K_RETURN:
+                    if self.paused:
+                        if self.pause_selected_button == 0:
+                            self.paused = False
+                        elif self.pause_selected_button == 1:
+                            return "menu"
             
-            # Handle key input for recipe panel
-            if self.show_recipe_panel and self.recipe_panel:
+            if self.show_recipe_panel and self.recipe_panel and event.type == pygame.KEYDOWN:
                 panel_result = self.recipe_panel.handle_key(event)
                 if panel_result:
-                    return self._handle_recipe_panel_action(panel_result)
+                    self._handle_recipe_panel_action(panel_result)
         
         return True
     
     def _handle_recipe_panel_action(self, action):
-        """Handle actions from the recipe panel."""
-        if action == "close":
+        """Handle actions from the targets modal."""
+        result = self.recipe_panel.process_action(action)
+        if result == "close":
             self.show_recipe_panel = False
-            return True
-        elif action == "generate":
-            # Close the panel and return to trigger generation
-            self.show_recipe_panel = False
-            return "generate"
-        elif action.startswith("remove_"):
-            index = int(action.split("_")[1])
-            self.recipe_panel.remove_recipe(index)
-            return True
-        elif action in ("add", "add_from_suggestion"):
-            if self.recipe_panel.typing_item_name:
-                count = int(self.recipe_panel.typing_count) if self.recipe_panel.typing_count and self.recipe_panel.typing_count.isdigit() else 1
-                self.recipe_panel.add_recipe(self.recipe_panel.typing_item_name, count)
-                self.recipe_panel.typing_item_name = ""
-                self.recipe_panel.typing_count = ""
-                self.recipe_panel.suggestions = []
-                self.recipe_panel.active_input_field = "item_name"
-            return True
-        elif action == "recipe_added":
-            # Recipe was added, update if needed
-            return True
+            return
+        if result == "generate":
+            targets = self.recipe_panel.get_recipes()
+            if self._generate_from_targets(targets):
+                self.show_recipe_panel = False
+        return
     
     def _reset_camera(self):
         """Reset camera position and zoom."""
@@ -366,116 +447,175 @@ class BlueprintRenderer:
             pygame.draw.circle(self.screen, (255, 0, 0), (screen_x, screen_y), marker_radius)
             pygame.draw.circle(self.screen, (255, 255, 255), (screen_x, screen_y), marker_radius, 2)
     
-    def render(self, blueprint, blueprint_string=None):
-        """
-        Render a blueprint.
-        
-        Args:
-            blueprint: Blueprint dictionary with entities list
-            blueprint_string: Encoded blueprint string for copying
-        
-        Returns:
-            String indicating exit reason ("menu" if returned to menu)
-        """
-        entities = blueprint.get('blueprint', {}).get('entities', [])
-        
-        if not entities:
-            self.logger.warning("No entities to render")
-            return None
-        
-        # Store blueprint string for copying
-        self.blueprint_string = blueprint_string
-        
-        # Initialize toolbar
-        if self.toolbar is None:
-            self.toolbar = Toolbar(self.width, self.height, self.height)
-        
-        # Initialize recipe panel
+    def _workspace_interactive(self):
+        """True when the user can pan/zoom the blueprint canvas."""
+        return not self.paused and not self.show_recipe_panel
+
+    def load_blueprint(self, gen_result):
+        """Load generated blueprint data into the workspace."""
+        from core.pipeline import BlueprintGenerationResult
+
+        if isinstance(gen_result, BlueprintGenerationResult):
+            self.entities = gen_result.blueprint.get("blueprint", {}).get("entities", [])
+            self.blueprint_string = gen_result.blueprint_string
+            self.production_stages = gen_result.production_stages
+        else:
+            blueprint = gen_result
+            self.entities = blueprint.get("blueprint", {}).get("entities", [])
+            self.production_stages = []
+
+        self.input_positions.clear()
+        self.output_positions.clear()
+        self.identify_inputs_outputs(self.entities)
+        if self.entities:
+            self.initialize_screen(self.entities)
+
+    def _generate_from_targets(self, targets):
+        """Run the generation pipeline and update the workspace."""
+        from core.pipeline import GenerationStage, run_generation_pipeline
+
+        if not targets:
+            self.logger.warning("No production targets set.")
+            return False
+
+        gen_result = run_generation_pipeline(targets, self._recipes_data)
+        self.load_blueprint(gen_result)
+        self.logger.info(
+            "[%s] %s entities, %s production stage(s)",
+            GenerationStage.VISUALIZE,
+            gen_result.entity_count,
+            len(gen_result.production_stages),
+        )
+        return True
+
+    def _open_targets_modal(self):
+        """Show the production-targets modal."""
         if self.recipe_panel is None:
             self.recipe_panel = RecipePanel()
-        
-        # Identify input/output positions
-        self.identify_inputs_outputs(entities)
-        
-        # Initialize screen if not already done
-        if self.screen is None:
-            self.initialize_screen(entities)
-        
-        self.logger.info(f"Rendering {len(entities)} entities")
-        
-        running = True
-        result = None
-        show_recipe_menu = False
-        
-        while running:
+        self.show_recipe_panel = True
+
+    def run_workspace(self, recipes_data, initial_targets=None, open_targets_modal=False):
+        """Main workspace loop: canvas + toolbar, targets in a modal overlay.
+
+        Returns:
+            "menu" when returning to the main menu, "exit" on quit.
+        """
+        self._recipes_data = recipes_data
+        self.screen = self.screen_manager.get_screen()
+        self.screen_manager.set_caption("Factorio Blueprint Workspace")
+
+        if self.toolbar is None:
+            self.toolbar = Toolbar(self.width, self.height, self.height)
+        if self.recipe_panel is None:
+            self.recipe_panel = RecipePanel()
+        if initial_targets:
+            self.recipe_panel.load_targets(initial_targets)
+
+        self.entities = []
+        self.blueprint_string = None
+        self.production_stages = []
+        self.show_recipe_panel = open_targets_modal
+        self.paused = False
+        self._reset_camera()
+
+        while True:
             action = self.handle_events()
-            
-            # Handle toolbar actions
-            if action == "recipes":
-                if not self.recipe_panel:
-                    self.recipe_panel = RecipePanel()
-                self.show_recipe_panel = True
-            elif action == "generate":
-                # Trigger blueprint generation with recipes
-                return "generate_blueprint"
+
+            if action == "menu":
+                return "menu"
+            if action == "exit":
+                return "exit"
+            if action == "targets":
+                self._open_targets_modal()
             elif action == "copy":
                 if self.blueprint_string:
                     self.toolbar.copy_to_clipboard(self.blueprint_string)
-                    self.logger.info("Blueprint copied to clipboard!")
                 else:
-                    self.logger.warning("No blueprint string to copy")
+                    self.logger.warning("No blueprint to copy yet.")
             elif action == "pause":
                 self.paused = not self.paused
-            elif action == "menu":
-                return "menu"
-            
-            # If handle_events returns a string, we should exit
-            if action in ("menu", "exit"):
-                break
-            
-            # Clear screen
-            self.screen.fill((30, 30, 40))  # Dark background
-            
-            # Draw recipe panel if shown (draws background)
+
+            self._draw_workspace()
             if self.show_recipe_panel and self.recipe_panel:
                 self.recipe_panel.draw(self.screen)
-            else:
-                # Only draw blueprint if recipe panel is not shown
-                # Render grid
-                self.render_grid()
-                
-                # Render entities
-                for entity in entities:
-                    self.render_entity(entity)
-                
-                # Render position markers
-                self.render_position_markers()
-                
-                # Draw UI info (only if not paused)
-                if not self.paused:
-                    self._draw_ui_info(len(entities))
-                
-                # Draw toolbar
-                if self.toolbar:
-                    self.toolbar.draw(self.screen)
-            
-            # Draw pause menu if paused
             if self.paused:
                 self._draw_pause_menu()
-        
+
             self.screen_manager.flip()
             self.screen_manager.tick(60)
-        
-        return result if result else action
-    
+
+    def _draw_workspace(self):
+        """Draw the blueprint canvas, toolbar, and empty-state hint."""
+        self.screen.fill((30, 30, 40))
+
+        self.render_grid()
+        for entity in self.entities:
+            self.render_entity(entity)
+
+        if self.entities:
+            self.render_position_markers()
+            self.render_production_stages()
+            if not self.paused:
+                self._draw_ui_info(len(self.entities))
+        elif not self.paused and not self.show_recipe_panel:
+            self._draw_empty_hint()
+
+        if self.toolbar:
+            self.toolbar.draw(self.screen)
+
+    def _draw_empty_hint(self):
+        """Hint shown on an empty workspace before the first generation."""
+        font = pygame.font.Font(None, 36)
+        hint = font.render(
+            "Set production targets and click Generate",
+            True,
+            (160, 160, 170),
+        )
+        sub = pygame.font.Font(None, 24).render(
+            "Toolbar: Set Targets  |  Scroll to zoom, drag to pan",
+            True,
+            (120, 120, 130),
+        )
+        hint_rect = hint.get_rect(center=(self.width // 2, self.height // 2 - 20))
+        sub_rect = sub.get_rect(center=(self.width // 2, self.height // 2 + 20))
+        self.screen.blit(hint, hint_rect)
+        self.screen.blit(sub, sub_rect)
+
+    def render_production_stages(self):
+        """Label each production stage from the generation pipeline."""
+        if not self.production_stages:
+            return
+
+        font = pygame.font.Font(None, 22)
+        for index, stage in enumerate(self.production_stages, start=1):
+            position = stage.get("position")
+            if not position or len(position) < 2:
+                continue
+            x, y = position[0], position[1]
+            screen_x, screen_y = self.world_to_screen(x, y)
+            tile = int(self.tile_size * self.zoom)
+            label_y = screen_y - max(14, int(14 * self.zoom))
+
+            item = stage.get("type", "unknown")
+            display_name = item.replace("-", " ").title()
+            label = font.render(f"S{index}: {display_name}", True, (200, 220, 255))
+            outline = font.render(f"S{index}: {display_name}", True, (20, 20, 30))
+            label_x = screen_x + (tile - label.get_width()) // 2
+            self.screen.blit(outline, (label_x + 1, label_y + 1))
+            self.screen.blit(label, (label_x, label_y))
+
     def _draw_ui_info(self, entity_count):
         """Draw UI information overlay."""
         font = pygame.font.Font(None, 24)
         
         # Create info text
         legend = "Green=Input, Red=Output | "
-        info_text = f"{legend}Entities: {entity_count} | Zoom: {self.zoom:.2f}x"
-        controls = "Controls: Scroll=Zoom, Drag=Pan, S=Save, R=Reset, ESC=Pause"
+        stage_count = len(self.production_stages)
+        info_text = (
+            f"{legend}Entities: {entity_count} | Stages: {stage_count} | "
+            f"Zoom: {self.zoom:.2f}x"
+        )
+        controls = "T=Targets | Scroll=Zoom | Drag=Pan | S=Save | R=Reset | ESC=Pause"
         
         # Draw semi-transparent background for text
         text_surface = font.render(info_text, True, (255, 255, 255))

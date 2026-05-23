@@ -55,7 +55,7 @@ class Toolbar:
         }
         
         button_texts = {
-            "recipes": "Set Recipes",
+            "recipes": "Set Targets",
             "copy": "Copy Blueprint",
             "pause": "Pause Menu",
         }

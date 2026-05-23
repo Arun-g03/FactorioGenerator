@@ -1,7 +1,14 @@
+# Production targets and planner logic use items per minute ("min") or per second ("sec").
+PRODUCTION_RATE_UNIT = "min"
 
 PRODUCTION_TARGETS = {
-   "iron-plate": 20  # Produce 60 gear wheels per minute
+   "iron-plate": 20  # items per minute
 }
+
+
+def production_rate_suffix():
+    """Display suffix for the active production rate unit (e.g. '/min')."""
+    return f"/{PRODUCTION_RATE_UNIT}"
 
 BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone"}
 
@@ -34,4 +41,15 @@ def get_factorio_graphics_path(base_path):
 
 # Default full graphics path (for backward compatibility)
 FACTORIO_BASE_GRAPHICS_PATH = get_factorio_graphics_path(FACTORIO_INSTALL_PATH)
+
+# Entity folders under graphics/entity with dedicated sprite loading logic
+BELT_ENTITIES = ("transport-belt", "fast-transport-belt", "express-transport-belt")
+UNDERGROUND_BELT_ENTITIES = ("underground-belt", "fast-underground-belt", "express-underground-belt")
+INSERTER_ENTITIES = (
+    "inserter",
+    "fast-inserter",
+    "long-handed-inserter",
+    "burner-inserter",
+    "bulk-inserter",
+)
 

@@ -9,7 +9,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.constants import PYGAME_WINDOW_WIDTH, PYGAME_WINDOW_HEIGHT
+from core.constants import (
+    PYGAME_WINDOW_WIDTH,
+    PYGAME_WINDOW_HEIGHT,
+    PRODUCTION_RATE_UNIT,
+    production_rate_suffix,
+)
 import json
 
 class RecipePanel:
@@ -101,6 +106,28 @@ class RecipePanel:
             Formatted name (e.g., "Iron Gear Wheel")
         """
         return item_name.replace('-', ' ').title()
+
+    def _rate_unit_long(self):
+        """Human-readable unit name for subtitles (e.g. 'minute')."""
+        return {"min": "minute", "sec": "second"}.get(PRODUCTION_RATE_UNIT, PRODUCTION_RATE_UNIT)
+
+    def _rate_suffix_width(self):
+        return self.input_font.size(production_rate_suffix())[0]
+
+    def _add_row_rate_input_rect(self, add_y):
+        """Rate input box for the add-new-target row."""
+        return pygame.Rect(self.panel_x + 230, add_y, 80, 40)
+
+    def _add_row_add_button_rect(self, add_y):
+        """+ button placed after the rate input and unit suffix."""
+        rate_rect = self._add_row_rate_input_rect(add_y)
+        return pygame.Rect(rate_rect.right + 8 + self._rate_suffix_width(), add_y, 40, 40)
+
+    def _draw_rate_suffix(self, screen, x, y, color=None):
+        """Draw the active rate suffix (e.g. '/min') beside a numeric value."""
+        color = color or (180, 180, 190)
+        suffix_surface = self.input_font.render(production_rate_suffix(), True, color)
+        screen.blit(suffix_surface, (x, y))
     
     def update_suggestions(self):
         """Update autocomplete suggestions based on typed text."""
@@ -134,6 +161,39 @@ class RecipePanel:
     def get_recipes(self):
         """Get the current recipe list as a dictionary."""
         return {recipe['item']: recipe['count'] for recipe in self.recipes}
+
+    def load_targets(self, targets):
+        """Pre-populate the panel from a {item: count} dict."""
+        for item_name, count in targets.items():
+            self.add_recipe(item_name, count)
+
+    def process_action(self, action):
+        """Apply a click or keyboard action.
+
+        Returns:
+            "generate", "close", or None to keep the panel open.
+        """
+        if action == "close":
+            return "close"
+        if action == "generate":
+            return "generate"
+        if action and action.startswith("remove_"):
+            self.remove_recipe(int(action.split("_")[1]))
+            return None
+        if action in ("add", "add_from_suggestion"):
+            if self.typing_item_name:
+                count = (
+                    int(self.typing_count)
+                    if self.typing_count and self.typing_count.isdigit()
+                    else 1
+                )
+                self.add_recipe(self.typing_item_name, count)
+                self.typing_item_name = ""
+                self.typing_count = ""
+                self.suggestions = []
+                self.active_input_field = "item_name"
+            return None
+        return None
     
     def draw(self, screen):
         """Draw the recipe panel."""
@@ -154,6 +214,13 @@ class RecipePanel:
         title_rect = title_surface.get_rect(center=(self.panel_x + self.panel_width // 2, 
                                                       self.panel_y + 40))
         screen.blit(title_surface, title_rect)
+
+        subtitle_text = f"Rates in items per {self._rate_unit_long()}"
+        subtitle_surface = self.button_font.render(subtitle_text, True, (180, 180, 190))
+        subtitle_rect = subtitle_surface.get_rect(
+            center=(self.panel_x + self.panel_width // 2, self.panel_y + 72)
+        )
+        screen.blit(subtitle_surface, subtitle_rect)
         
         # Draw recipe list
         y_offset = self.panel_y + 100
@@ -177,10 +244,15 @@ class RecipePanel:
             name_surface = self.item_font.render(formatted_name, True, self.item_text_color)
             screen.blit(name_surface, (item_rect.x + 10, item_rect.y + 8))
             
-            # Count input
+            # Production rate with active unit suffix only
+            rate_x = item_rect.x + 250
+            rate_y = item_rect.y + 8
             count_text = str(recipe['count'])
-            count_surface = self.input_font.render(f"Count: {count_text}", True, self.item_text_color)
-            screen.blit(count_surface, (item_rect.x + 250, item_rect.y + 8))
+            count_surface = self.input_font.render(count_text, True, self.item_text_color)
+            screen.blit(count_surface, (rate_x, rate_y))
+            self._draw_rate_suffix(
+                screen, rate_x + count_surface.get_width() + 6, rate_y, self.item_text_color
+            )
             
             # Remove button (X)
             remove_btn = pygame.Rect(item_rect.right - 40, item_rect.y + 5, 35, 35)
@@ -213,8 +285,8 @@ class RecipePanel:
         input_surface = self.input_font.render(text_to_show + cursor, True, self.item_text_color)
         screen.blit(input_surface, (input_rect.x + 10, input_rect.y + 8))
         
-        # Input field for count
-        count_input_rect = pygame.Rect(self.panel_x + 230, add_y, 80, 40)
+        # Input field for production rate
+        count_input_rect = self._add_row_rate_input_rect(add_y)
         pygame.draw.rect(screen, (30, 30, 40), count_input_rect, border_radius=5)
         pygame.draw.rect(screen,
                         (255, 255, 255) if self.active_input_field == "count" else (100, 100, 100),
@@ -229,10 +301,13 @@ class RecipePanel:
         
         count_surface = self.input_font.render(text_to_show + cursor, True, self.item_text_color)
         screen.blit(count_surface, (count_input_rect.x + 10, count_input_rect.y + 8))
-        
+        self._draw_rate_suffix(
+            screen, count_input_rect.right + 6, count_input_rect.y + 8
+        )
+
         # Add button (+ button) - only show if there's content to add
         if self.typing_item_name:
-            add_btn = pygame.Rect(count_input_rect.right + 10, add_y, 40, 40)
+            add_btn = self._add_row_add_button_rect(add_y)
             is_hovered = add_btn.collidepoint(mouse_pos)
             add_color = self.button_hover_color if is_hovered else self.button_color
             pygame.draw.rect(screen, add_color, add_btn, border_radius=5)
@@ -290,8 +365,9 @@ class RecipePanel:
         
         # Instructions
         instructions = [
-            "Click on input fields to edit",
-            "Press Enter to submit, Generate to create blueprint, ESC to close"
+            f"Enter target rate as items {production_rate_suffix()}",
+            "Generate updates the workspace behind this dialog",
+            "ESC or Close to return to the canvas",
         ]
         for i, instruction in enumerate(instructions):
             inst_surface = self.button_font.render(instruction, True, (150, 150, 150))
@@ -320,7 +396,7 @@ class RecipePanel:
         # Check input fields
         add_y = self.panel_y + self.panel_height - 150
         item_name_input = pygame.Rect(self.panel_x + 20, add_y, 200, 40)
-        count_input = pygame.Rect(self.panel_x + 230, add_y, 80, 40)
+        count_input = self._add_row_rate_input_rect(add_y)
         
         if item_name_input.collidepoint(mouse_pos):
             self.active_input_field = "item_name"
@@ -349,7 +425,7 @@ class RecipePanel:
         
         # Check add button (+ button)
         if self.typing_item_name and (self.typing_count.isdigit() or self.typing_count == ""):
-            add_btn = pygame.Rect(count_input.right + 10, add_y, 40, 40)
+            add_btn = self._add_row_add_button_rect(add_y)
             if add_btn.collidepoint(mouse_pos):
                 return "add"
         
