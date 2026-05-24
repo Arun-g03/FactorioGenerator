@@ -23,12 +23,13 @@ def place_machine_io_block(
 
     if flow_east:
         belt_direction = FACTORIO_EAST
-        input_belt_start_x = machine_x - belt_count
-        output_belt_start_x = machine_x + machine_w
+        # [belt][belt][belt] -> [inserter] -> [machine] -> [inserter] -> [belt][belt][belt]
+        input_belt_start_x = machine_x - belt_count - 1
+        output_belt_start_x = machine_x + machine_w + 1
         input_inserter_pos = (machine_x - 1, lane_y)
         output_inserter_pos = (machine_x + machine_w, lane_y)
         inserter_pickup = (input_inserter_pos[0] - 1, lane_y)
-        inserter_drop = output_inserter_pos
+        inserter_drop = (output_inserter_pos[0] + 1, lane_y)
     else:
         belt_direction = direction_for_flow((machine_x, lane_y), (machine_x, lane_y + 1))
         input_belt_start_x = machine_x

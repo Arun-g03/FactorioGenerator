@@ -56,6 +56,10 @@ class BlueprintRenderer:
         self._recipes_data = None
         self._generation_mode = None
         self.placement_strategy = PlacementStrategy.RULE_BASED
+        self.layout_fitness = None
+        self.genetic_generations = 0
+        self.genetic_converged = False
+        self._genetic_progress = None
     
     def calculate_bounds(self, entities):
         """Calculate the bounding box for all entities."""
@@ -71,20 +75,40 @@ class BlueprintRenderer:
     
     def initialize_screen(self, entities):
         """Initialize the pygame screen based on blueprint bounds."""
-        min_x, min_y, width, height = self.calculate_bounds(entities)
-        
-        # Get screen from manager
         self.screen = self.screen_manager.get_screen()
         self.screen_manager.set_caption("Factorio Blueprint Visualizer")
-        
-        # Center camera on blueprint
-        padding = 5
-        self.camera_x = -min_x * self.tile_size + padding * self.tile_size
-        self.camera_y = -min_y * self.tile_size + padding * self.tile_size
-        
-        screen_width = PYGAME_WINDOW_WIDTH
-        screen_height = PYGAME_WINDOW_HEIGHT
-        self.logger.info(f"Initialized screen: {screen_width}x{screen_height}")
+        self._center_camera_on_blueprint(entities)
+        self.logger.info(
+            "Initialized screen: %sx%s",
+            PYGAME_WINDOW_WIDTH,
+            PYGAME_WINDOW_HEIGHT,
+        )
+
+    def _viewport_center(self):
+        """Pixel center of the drawable canvas (area above the toolbar)."""
+        canvas_bottom = self.toolbar.y_position if self.toolbar else self.height
+        return self.width // 2, canvas_bottom // 2
+
+    def _center_camera_on_blueprint(self, entities=None):
+        """Pan the camera so the blueprint bounding box is centered in the workspace."""
+        entities = entities if entities is not None else self.entities
+        if not entities:
+            self.logger.warning("No blueprint to center on.")
+            return False
+
+        min_x, min_y, width, height = self.calculate_bounds(entities)
+        world_cx = min_x + width / 2
+        world_cy = min_y + height / 2
+        screen_cx, screen_cy = self._viewport_center()
+        scale = self.tile_size * self.zoom
+        self.camera_x = screen_cx - world_cx * scale
+        self.camera_y = screen_cy - world_cy * scale
+        self.logger.info(
+            "Centered camera on blueprint at (%.1f, %.1f)",
+            world_cx,
+            world_cy,
+        )
+        return True
     
     def world_to_screen(self, world_x, world_y):
         """Convert world coordinates to screen coordinates."""
@@ -267,13 +291,13 @@ class BlueprintRenderer:
         
         color = (50, 50, 50)
         
-        # Draw vertical lines
-        start_x = self.camera_x % grid_spacing
+        # Draw vertical lines (camera is float from panning; range needs ints)
+        start_x = int(self.camera_x) % grid_spacing
         for x in range(start_x, width, grid_spacing):
             pygame.draw.line(self.screen, color, (x, 0), (x, height), 1)
         
         # Draw horizontal lines
-        start_y = self.camera_y % grid_spacing
+        start_y = int(self.camera_y) % grid_spacing
         for y in range(start_y, height, grid_spacing):
             pygame.draw.line(self.screen, color, (0, y), (width, y), 1)
     
@@ -364,6 +388,8 @@ class BlueprintRenderer:
                     self.save_screenshot()
                 elif event.key == pygame.K_r and self._workspace_interactive():
                     self._reset_camera()
+                elif event.key == pygame.K_c and self._workspace_interactive():
+                    self._center_camera_on_blueprint()
                 elif event.key == pygame.K_UP:
                     if self.paused:
                         self.pause_selected_button = (self.pause_selected_button - 1) % 2
@@ -467,6 +493,10 @@ class BlueprintRenderer:
             self.blueprint_string = gen_result.blueprint_string
             self.production_stages = gen_result.production_stages
             self.rate_summary = gen_result.rate_summary
+            self.placement_strategy = gen_result.placement_strategy
+            self.layout_fitness = gen_result.layout_fitness
+            self.genetic_generations = gen_result.genetic_generations
+            self.genetic_converged = gen_result.genetic_converged
         else:
             blueprint = gen_result
             self.entities = blueprint.get("blueprint", {}).get("entities", [])
@@ -523,9 +553,20 @@ class BlueprintRenderer:
 
         self._generation_mode = mode
         self.placement_strategy = placement
+
+        progress_callback = None
+        if placement == PlacementStrategy.GENETIC:
+            progress_callback = self._on_genetic_progress
+
+        self._genetic_progress = None
         gen_result = run_generation_pipeline(
-            targets, self._recipes_data, mode, placement
+            targets,
+            self._recipes_data,
+            mode,
+            placement,
+            progress_callback=progress_callback,
         )
+        self._genetic_progress = None
         self.load_blueprint(gen_result)
         self.logger.info(
             "[%s] %s entities, %s stage(s), placement=%s",
@@ -535,6 +576,63 @@ class BlueprintRenderer:
             placement.value,
         )
         return True
+
+    def _genetic_stale_limit(self):
+        from planners.genetic_placement import STALE_GENERATIONS_LIMIT
+        return STALE_GENERATIONS_LIMIT
+
+    def _on_genetic_progress(self, generation, fitness, stale_generations, done):
+        """Pump UI while genetic placement runs (called each generation)."""
+        self._genetic_progress = {
+            "generation": generation,
+            "fitness": fitness,
+            "stale": stale_generations,
+            "done": done,
+        }
+        pygame.event.pump()
+        self._draw_workspace()
+        self._draw_genetic_progress_overlay()
+        if self.toolbar:
+            self.toolbar.draw(self.screen)
+        self.screen_manager.flip()
+
+    def _draw_genetic_progress_overlay(self):
+        """Semi-transparent status while genetic optimization is running."""
+        if not self._genetic_progress:
+            return
+
+        overlay = pygame.Surface((self.width, self.height))
+        overlay.set_alpha(140)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+
+        p = self._genetic_progress
+        title_font = pygame.font.Font(None, 42)
+        detail_font = pygame.font.Font(None, 28)
+
+        if p["done"]:
+            title = "Genetic placement complete"
+        else:
+            title = "Genetic placement — searching for best layout"
+
+        title_surf = title_font.render(title, True, (255, 220, 100))
+        title_rect = title_surf.get_rect(center=(self.width // 2, self.height // 2 - 50))
+        self.screen.blit(title_surf, title_rect)
+
+        lines = [
+            f"Generation: {p['generation']}",
+            f"Best fitness: {p['fitness']:.1f}",
+            f"Stale generations: {p['stale']} / {self._genetic_stale_limit()}",
+        ]
+        if not p["done"]:
+            lines.append("Runs until fitness stops improving…")
+
+        y = title_rect.bottom + 16
+        for line in lines:
+            surf = detail_font.render(line, True, (220, 220, 230))
+            rect = surf.get_rect(center=(self.width // 2, y))
+            self.screen.blit(surf, rect)
+            y += 32
 
     def _open_targets_modal(self):
         """Show the production-targets modal."""
@@ -590,6 +688,8 @@ class BlueprintRenderer:
                     self.logger.warning("No blueprint to copy yet.")
             elif action == "pause":
                 self.paused = not self.paused
+            elif action == "center":
+                self._center_camera_on_blueprint()
 
             self._draw_workspace()
             if self.show_recipe_panel and self.recipe_panel:
@@ -629,7 +729,7 @@ class BlueprintRenderer:
             (160, 160, 170),
         )
         sub = pygame.font.Font(None, 24).render(
-            "Toggle Place: Rules / Genetic  |  T=targets  |  Scroll zoom, drag pan",
+            "Toggle Place: Rules / Genetic  |  T=targets  |  C=center  |  Scroll zoom, drag pan",
             True,
             (120, 120, 130),
         )
@@ -677,10 +777,20 @@ class BlueprintRenderer:
         )
         controls = (
             f"G=Generate | Place:{placement_label} | T=Targets | "
-            "Scroll=Zoom | Drag=Pan | ESC=Pause"
+            "Center=recenter | Scroll=Zoom | Drag=Pan | ESC=Pause"
         )
 
         lines = [info_text, controls]
+        if self.layout_fitness is not None:
+            gen_gens = (
+                self.genetic_generations
+                if self.placement_strategy == PlacementStrategy.GENETIC
+                else None
+            )
+            lines.extend(self.layout_fitness.ui_summary_lines(genetic_generations=gen_gens))
+            if self.placement_strategy == PlacementStrategy.GENETIC:
+                status = "converged" if self.genetic_converged else "max generations"
+                lines.append(f"  Genetic run: {status}")
         for line in self.rate_summary[:4]:
             name = line.item.replace("-", " ")
             text = (

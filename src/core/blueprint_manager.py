@@ -25,7 +25,7 @@ class BlueprintManager:
         self.planner = None
         self.rate_summary = []
 
-    def generate_blueprint(self):
+    def generate_blueprint(self, progress_callback=None):
         from core import constants as constants_module
 
         targets = constants_module.PRODUCTION_TARGETS
@@ -48,7 +48,7 @@ class BlueprintManager:
         )
         if self.placement_strategy == PlacementStrategy.GENETIC:
             entities, entity_number = self.planner.generate_genetic(
-                targets, entities, entity_number
+                targets, entities, entity_number, progress_callback=progress_callback
             )
         else:
             entities, entity_number = self.planner.generate(
@@ -56,9 +56,19 @@ class BlueprintManager:
             )
         self.rate_summary = self.planner.rate_summary
         production_stages = list(self.planner.production_stages)
+        layout_fitness = self.planner.layout_fitness
+        genetic_generations = getattr(self.planner, "genetic_generations", 0)
+        genetic_converged = getattr(self.planner, "genetic_converged", False)
 
         blueprint = self.create_blueprint(entities)
-        return blueprint, production_stages, self.rate_summary
+        return (
+            blueprint,
+            production_stages,
+            self.rate_summary,
+            layout_fitness,
+            genetic_generations,
+            genetic_converged,
+        )
 
     def create_blueprint(self, entities):
         return {

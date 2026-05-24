@@ -1,5 +1,7 @@
 """Blueprint generation pipeline: placement → encode → visualization."""
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 
@@ -9,6 +11,7 @@ from core.belt_router import BeltRouter
 from core.blueprintEncoder import encode_blueprint
 from core.blueprint_manager import BlueprintManager
 from core.constants import GenerationMode, PlacementStrategy
+from planners.layout_fitness import LayoutFitnessBreakdown
 
 
 class GenerationStage:
@@ -31,6 +34,9 @@ class BlueprintGenerationResult:
     entity_count: int = 0
     rate_summary: list = field(default_factory=list)
     placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED
+    layout_fitness: LayoutFitnessBreakdown | None = None
+    genetic_generations: int = 0
+    genetic_converged: bool = False
 
     @classmethod
     def from_blueprint(
@@ -55,6 +61,7 @@ def run_generation_pipeline(
     recipes_data,
     generation_mode: GenerationMode = GenerationMode.ASSEMBLER_ONLY,
     placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED,
+    progress_callback=None,
 ) -> BlueprintGenerationResult:
     """Stages: init → place entities → encode blueprint string."""
     logging.info("[%s] Initializing components...", GenerationStage.INIT)
@@ -80,7 +87,14 @@ def run_generation_pipeline(
     )
 
     logging.info("[%s] Placing entities and production stages...", GenerationStage.PLACE)
-    blueprint, production_stages, rate_summary = blueprint_manager.generate_blueprint()
+    (
+        blueprint,
+        production_stages,
+        rate_summary,
+        layout_fitness,
+        genetic_generations,
+        genetic_converged,
+    ) = blueprint_manager.generate_blueprint(progress_callback=progress_callback)
 
     logging.info("[%s] Encoding blueprint string...", GenerationStage.ENCODE)
     blueprint_string = encode_blueprint(blueprint)
@@ -90,4 +104,7 @@ def run_generation_pipeline(
         blueprint, blueprint_string, production_stages, rate_summary
     )
     result.placement_strategy = placement_strategy
+    result.layout_fitness = layout_fitness
+    result.genetic_generations = genetic_generations
+    result.genetic_converged = genetic_converged
     return result

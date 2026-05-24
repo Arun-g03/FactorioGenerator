@@ -52,6 +52,7 @@ class Toolbar:
             "targets": 118,
             "generate": 100,
             "placement": 128,
+            "center": 96,
             "copy": 118,
             "pause": 100,
         }
@@ -73,6 +74,7 @@ class Toolbar:
                 if self.placement_strategy == PlacementStrategy.GENETIC
                 else (70, 85, 100),
             ),
+            ("center", "Center", button_widths["center"], (70, 110, 130)),
             ("copy", "Copy BP", button_widths["copy"], self.button_color),
             ("pause", "Pause", button_widths["pause"], self.button_color),
         ]

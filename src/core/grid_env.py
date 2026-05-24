@@ -29,14 +29,6 @@ class Grid:
                 cell_y = y_start + dy
                 self.occupied[(cell_x, cell_y)] = entity_name
 
-                
-    def is_occupied(self, x, y, width=1, height=1):
-        for i in range(width):
-            for j in range(height):
-                if (x + i, y + j) in self.occupied:
-                    return True
-        return False
-
     def mark_resource_lane(self, x, y, resource):
         if (x, y) not in self.belt_lanes:
             self.belt_lanes[(x, y)] = [None, None]

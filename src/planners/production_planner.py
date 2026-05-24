@@ -1,5 +1,7 @@
 """Rate-driven blueprint placement with Factorio game rules."""
 
+from __future__ import annotations
+
 import logging
 import math
 from dataclasses import dataclass, field
@@ -11,6 +13,7 @@ from core.constants import (
 )
 from planners.machine_placer.calculations import ProductionCalculator
 from planners.machine_placer.positioning import PositionFinder
+from planners.layout_fitness import evaluate_stage_layout
 from planners.machine_io import place_machine_io_block
 
 
@@ -48,13 +51,18 @@ class ProductionPlanner:
         self.nodes: dict[str, RateNode] = {}
         self.rate_summary: list[RateSummaryLine] = []
         self.production_stages: list = []
+        self.stage_machines: dict[str, list] = {}
         self._stage_spacing = 18
         self._next_stage_x = 10
         self._stage_y = 15
+        self.layout_fitness = None
+        self.genetic_generations = 0
+        self.genetic_converged = False
 
     def build_rate_graph(self, targets: dict[str, float]):
         """Populate self.nodes from user targets and mode."""
         self.nodes.clear()
+        self.stage_machines.clear()
         demands: dict[str, float] = {}
         user_targets = set(targets.keys())
 
@@ -166,10 +174,24 @@ class ProductionPlanner:
             self.grid.occupy(mx, my, machine_name, [w, h])
             entity_number += 1
 
+            self.stage_machines.setdefault(node.item, []).append((mx, my, w, h))
+
             entity_number = place_machine_io_block(
                 self.grid, entities, entity_number, mx, my, w, h, flow_east=True
             )
 
+        return entity_number
+
+    def _connect_production_stages(self, entities, entity_number):
+        """Route belts between stages and from base-material buses."""
+        from planners.stage_connector import connect_base_materials, connect_stages
+
+        entity_number = connect_stages(
+            self.grid, entities, entity_number, self.stage_machines, self.nodes
+        )
+        entity_number = connect_base_materials(
+            self.grid, entities, entity_number, self.stage_machines, self.nodes
+        )
         return entity_number
 
     def build_rate_summary(self, targets: dict[str, float]):
@@ -195,21 +217,95 @@ class ProductionPlanner:
                 RateSummaryLine(item, requested, achieved, node.machine_count, warning)
             )
 
+    def _reset_placement_state(self, stage_y: int):
+        self._stage_y = stage_y
+        self._next_stage_x = 10
+        self.production_stages.clear()
+        self.stage_machines.clear()
+
+    def _place_all_nodes(self, entities: list, entity_number: int) -> int:
+        for node in self.topological_order():
+            entity_number = self.place_node(entities, entity_number, node)
+        return entity_number
+
     def generate(
         self, targets: dict[str, float], entities: list, entity_number: int
     ) -> tuple[list, int]:
-        """Full placement pass (deterministic rule-based layout)."""
+        """Rule-based placement; picks the best stage row among fitness candidates."""
         self.build_rate_graph(targets)
         self._refresh_machine_counts()
 
-        for node in self.topological_order():
-            entity_number = self.place_node(entities, entity_number, node)
+        grid_backup = dict(self.grid.occupied)
+        candidate_rows = (12, 15, 18, 22)
+        best_score = float("-inf")
+        best_pack = None
 
+        for stage_y in candidate_rows:
+            self.grid.occupied = dict(grid_backup)
+            self._reset_placement_state(stage_y)
+            trial_entities: list = []
+            trial_num = self._place_all_nodes(trial_entities, entity_number)
+            score = evaluate_stage_layout(
+                self.stage_machines, self.nodes, self.grid
+            ).total
+            if score > best_score:
+                best_score = score
+                best_pack = (
+                    trial_entities,
+                    trial_num,
+                    list(self.production_stages),
+                    {k: list(v) for k, v in self.stage_machines.items()},
+                    stage_y,
+                    dict(self.grid.occupied),
+                )
+
+        if best_pack:
+            trial_entities, trial_num, stages, machines, stage_y, grid_state = best_pack
+            entities.clear()
+            entities.extend(trial_entities)
+            entity_number = trial_num
+            self.production_stages = stages
+            self.stage_machines = machines
+            self._stage_y = stage_y
+            self.grid.occupied = grid_state
+            self.logger.info(
+                "Rule-based layout chose stage_y=%s (score=%.0f/100)",
+                stage_y,
+                best_score,
+            )
+        else:
+            self.grid.occupied = dict(grid_backup)
+
+        entity_number = self._connect_production_stages(entities, entity_number)
+        self._score_layout()
         self.build_rate_summary(targets)
         return entities, entity_number
 
+    def _score_layout(self):
+        """Evaluate layout quality (machines + estimated I/O; ignores placed belt tiles)."""
+        expected = {item: node.machine_count for item, node in self.nodes.items()}
+        self.layout_fitness = evaluate_stage_layout(
+            self.stage_machines,
+            self.nodes,
+            grid=None,
+            expected_counts=expected,
+        )
+        bd = self.layout_fitness
+        self.logger.info(
+            "Layout %s score=%.0f/100 (viability=%.0f, efficiency=%.0f, blockers=%s)",
+            "VIABLE" if bd.is_viable else "BROKEN",
+            bd.total,
+            bd.viability_score,
+            bd.efficiency_score,
+            len(bd.blockers),
+        )
+
     def generate_genetic(
-        self, targets: dict[str, float], entities: list, entity_number: int
+        self,
+        targets: dict[str, float],
+        entities: list,
+        entity_number: int,
+        progress_callback=None,
     ) -> tuple[list, int]:
         """Placement pass using genetic algorithm for machine positions."""
         from planners.genetic_placement import (
@@ -221,16 +317,29 @@ class ProductionPlanner:
         self.build_rate_graph(targets)
         self._refresh_machine_counts()
         self.production_stages.clear()
+        self.stage_machines.clear()
+        self.genetic_generations = 0
+        self.genetic_converged = False
 
         machine_slots = collect_machine_slots(self)
         if machine_slots:
             self.logger.info(
                 "Genetic placement for %s machines...", len(machine_slots)
             )
-            positions = run_genetic_layout(self.grid, machine_slots)
+            result = run_genetic_layout(
+                self.grid,
+                machine_slots,
+                self.nodes,
+                progress_callback=progress_callback,
+            )
+            self.genetic_generations = result.generations
+            self.genetic_converged = result.converged
+            self.layout_fitness = result.fitness_breakdown
             entity_number = place_machines_from_genetic_layout(
-                self, entities, entity_number, machine_slots, positions
+                self, entities, entity_number, machine_slots, result.machines
             )
 
+        entity_number = self._connect_production_stages(entities, entity_number)
+        self._score_layout()
         self.build_rate_summary(targets)
         return entities, entity_number

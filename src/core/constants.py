@@ -22,7 +22,7 @@ class PlacementStrategy(Enum):
 TRANSPORT_BELT_THROUGHPUT_PER_MIN = 15 * 60
 
 PRODUCTION_TARGETS = {
-   "iron-plate": 20  # items per minute
+   "inserter": 20  # items per minute
 }
 
 
