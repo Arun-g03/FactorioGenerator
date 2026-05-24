@@ -75,12 +75,8 @@ The system will:
 - **ESC**: Exit
 
 ### Recipe Configuration & Blueprint Viewer
-- **Mouse**: Click to interact, drag to pan blueprint
-- **Mouse Wheel**: Zoom in/out
-- **Keyboard**: Arrow keys to navigate menus, Enter to select
-- **ESC**: Pause/Return to menu
-- **S**: Save screenshot
-- **R**: Reset camera
+
+See [docs/controls.md](docs/controls.md) for the full list (toolbar, **Center**, placement toggle, etc.).
 
 ---
 
@@ -92,7 +88,10 @@ src/
 ├── planners/      # Production algorithms
 ├── ui/            # Pygame visualization
 └── data/          # Recipes, buildings JSON
+docs/              # Setup, architecture, generation, data model, development
 ```
+
+**Documentation:** [docs/README.md](docs/README.md) — start here for architecture, generation pipeline, data formats, and contributor notes (including guidance for AI assistants).
 
 ---
 
