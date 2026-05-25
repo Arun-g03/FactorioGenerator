@@ -1,6 +1,6 @@
 """Unified belt + inserter placement for production blocks."""
 
-from core.constants import FACTORIO_EAST, direction_for_flow
+from core.constants import FACTORIO_EAST, direction_for_flow, direction_for_inserter
 
 
 def place_machine_io_block(
@@ -39,6 +39,8 @@ def place_machine_io_block(
         inserter_pickup = (input_inserter_pos[0], input_inserter_pos[1] - 1)
         inserter_drop = output_inserter_pos
 
+    machine_center = (machine_x + machine_w // 2, machine_y + machine_h // 2)
+
     for i in range(belt_count):
         if flow_east:
             bx = input_belt_start_x + i
@@ -58,7 +60,7 @@ def place_machine_io_block(
 
     ix, iy = input_inserter_pos
     if not grid.is_occupied(ix, iy):
-        in_dir = direction_for_flow(inserter_pickup, (machine_x + machine_w // 2, machine_y + machine_h // 2))
+        in_dir = direction_for_inserter(inserter_pickup, machine_center)
         entities.append({
             "entity_number": entity_number,
             "name": "inserter",
@@ -87,7 +89,7 @@ def place_machine_io_block(
 
     ox, oy = output_inserter_pos
     if not grid.is_occupied(ox, oy):
-        out_dir = direction_for_flow((machine_x + machine_w // 2, machine_y + machine_h // 2), inserter_drop)
+        out_dir = direction_for_inserter(machine_center, inserter_drop)
         entities.append({
             "entity_number": entity_number,
             "name": "inserter",

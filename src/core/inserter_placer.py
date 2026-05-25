@@ -12,13 +12,7 @@ class InserterPlacer:
 
 
     def get_direction(self, source_x, source_y, target_x, target_y):
-        """Determine direction based on source and target positions."""
-        if source_x < target_x:
-            return 2  # East
-        elif source_x > target_x:
-            return 6  # West
-        elif source_y < target_y:
-            return 4  # South
-        elif source_y > target_y:
-            return None  # North
-        return None
+        """Blueprint direction from pickup tile to drop tile (cardinals only)."""
+        from core.constants import direction_for_inserter
+
+        return direction_for_inserter((source_x, source_y), (target_x, target_y))

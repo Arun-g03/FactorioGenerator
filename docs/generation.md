@@ -1,6 +1,6 @@
 # Generation
 
-How blueprints are computed from production targets. Read [architecture.md](architecture.md) for module names and [data-model.md](data-model.md) for JSON shapes.
+How blueprints are computed from production targets. Read [architecture.md](architecture.md) for module names, [data-model.md](data-model.md) for JSON shapes, and [placement-rules.md](placement-rules.md) for a full rule-by-rule reference.
 
 ## User-facing controls
 

@@ -8,6 +8,7 @@ Factorio Blueprint Generator — guides for humans and for AI assistants working
 |-----------------|------------|
 | Run the app locally | [setup.md](setup.md) |
 | Understand how blueprints are built | [generation.md](generation.md) |
+| See placement / layout rules in detail | [placement-rules.md](placement-rules.md) |
 | Navigate the codebase | [architecture.md](architecture.md) |
 | Change recipes or entity data | [data-model.md](data-model.md) |
 | Add features or fix bugs | [development.md](development.md) |
@@ -20,6 +21,7 @@ Factorio Blueprint Generator — guides for humans and for AI assistants working
 | [setup.md](setup.md) | Install, Python version, Factorio path, tests, troubleshooting |
 | [controls.md](controls.md) | Menus, workspace toolbar, shortcuts, UI flow |
 | [generation.md](generation.md) | Rate graph, placement strategies, belts, fitness, limits |
+| [placement-rules.md](placement-rules.md) | Machine placement, I/O blocks, connectors, fitness blockers |
 | [architecture.md](architecture.md) | Modules, call graph, active vs legacy code, imports |
 | [data-model.md](data-model.md) | `recipes.json`, blueprint entities, `config.json` |
 | [development.md](development.md) | Conventions, safe change points, anti-patterns, testing |

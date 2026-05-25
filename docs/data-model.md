@@ -65,7 +65,7 @@ Each entity in `blueprint["blueprint"]["entities"]` is a dict compatible with Fa
 | `entity_number` | yes | Unique index in blueprint |
 | `name` | yes | Prototype name (`transport-belt`, `assembling-machine-1`, …) |
 | `position` | yes | `{"x": float, "y": float}` — tile position |
-| `direction` | belts/inserters | `0/4/8/12` = N/E/S/W (`constants.FACTORIO_*`) |
+| `direction` | belts/inserters | `0–7` = N/NE/E/SE/S/SW/W/NW (`constants.DIRECTIONS`) |
 | `recipe` | assemblers/furnaces | Product item id |
 
 Example machine:
@@ -86,7 +86,7 @@ Example belt:
   "entity_number": 2,
   "name": "transport-belt",
   "position": {"x": 38, "y": 16},
-  "direction": 4
+  "direction": 2
 }
 ```
 

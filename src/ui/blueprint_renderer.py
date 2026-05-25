@@ -11,6 +11,7 @@ from core.constants import (
     PYGAME_WINDOW_HEIGHT,
     PYGAME_TILE_SIZE,
     PlacementStrategy,
+    inserter_direction_for_display,
 )
 
 class BlueprintRenderer:
@@ -160,7 +161,11 @@ class BlueprintRenderer:
                                (tile_screen_x, tile_screen_y, scaled_size, scaled_size))
                 self.logger.debug(f"No sprite for {sprite_name}, using fallback")
                 if is_inserter:
-                    self._draw_inserter_direction_arrow(tile_screen_x, tile_screen_y, direction)
+                    self._draw_inserter_direction_arrow(
+                        tile_screen_x,
+                        tile_screen_y,
+                        inserter_direction_for_display(direction),
+                    )
                 return
         
         sprite = self._scale_sprite_to_tile(sprite)
@@ -168,7 +173,11 @@ class BlueprintRenderer:
         self.screen.blit(sprite, (blit_x, blit_y))
 
         if is_inserter:
-            self._draw_inserter_direction_arrow(tile_screen_x, tile_screen_y, direction)
+            self._draw_inserter_direction_arrow(
+                tile_screen_x,
+                tile_screen_y,
+                inserter_direction_for_display(direction),
+            )
 
     def _scale_sprite_to_tile(self, sprite):
         """Scale a sprite to fit within one tile."""
@@ -191,7 +200,17 @@ class BlueprintRenderer:
         return screen_x + offset_x, screen_y + offset_y
 
     def _direction_to_arrow_vector(self, direction):
-        """Map entity direction to a screen-space unit vector (y grows downward)."""
+        """Map cardinal Factorio direction (0,2,4,6) to a screen-space unit vector."""
+        vectors = {
+            0: (0, -1),
+            2: (1, 0),
+            4: (0, 1),
+            6: (-1, 0),
+        }
+        if direction in vectors:
+            dx, dy = vectors[direction]
+            length = max((dx * dx + dy * dy) ** 0.5, 1.0)
+            return dx / length, dy / length
         suffix = SpriteMapper.CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
         return {
             "north": (0, -1),

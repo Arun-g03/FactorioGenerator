@@ -7,17 +7,17 @@ class SpriteMapper:
     Handles directional variants for belts and inserters.
     """
 
-    # Factorio directions and legacy planner values used in this repo
+    # Factorio blueprint directions 0–7 (see core.constants.DIRECTIONS)
     CARDINAL_DIRECTION_SUFFIX = {
         None: "north",
         0: "north",
+        1: "north",
         2: "east",
-        4: "east",
+        3: "east",
+        4: "south",
+        5: "south",
         6: "west",
-        8: "south",
-        10: "west",
-        12: "west",
-        14: "north",
+        7: "north",
     }
 
     def __init__(self):
