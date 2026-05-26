@@ -226,6 +226,7 @@ def evaluate_stage_layout(
     nodes: dict,
     grid=None,
     *,
+    entities: list | None = None,
     preferred_stage_y: int | None = PREFERRED_STAGE_Y,
     expected_counts: dict[str, int] | None = None,
 ) -> LayoutFitnessBreakdown:
@@ -312,6 +313,16 @@ def evaluate_stage_layout(
                     "machine I/O lanes collide (inserters cannot be placed)",
                 )
                 break
+
+    if entities:
+        from core.flow_connectivity import validate_blueprint_flow
+
+        flow = validate_blueprint_flow(
+            entities, stage_machines, nodes, stage_lanes=stage_lanes
+        )
+        for message in flow.errors:
+            breakdown.connection_penalty -= 5
+            _add_blocker(breakdown, message)
 
     estimated_belts = sum(len(m) for m in stage_machines.values()) * BELTS_PER_MACHINE
     base_material_feeds: dict[str, list] = {}

@@ -164,6 +164,13 @@ def inserter_pickup_tile(inserter_pos, blueprint_direction):
     return ix + dx, iy + dy
 
 
+def inserter_drop_tile(inserter_pos, blueprint_direction):
+    """Grid tile where the inserter places items (opposite of pickup)."""
+    ix, iy = inserter_pos
+    dx, dy = DIRECTION_FRONT_OFFSET.get(blueprint_direction, DIRECTION_FRONT_OFFSET[FACTORIO_EAST])
+    return ix - dx, iy - dy
+
+
 _INSERTER_PICKUP_TO_DROP = {
     FACTORIO_NORTH: FACTORIO_SOUTH,
     FACTORIO_SOUTH: FACTORIO_NORTH,

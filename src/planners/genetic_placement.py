@@ -16,21 +16,41 @@ from planners.machine_placer.calculations import (
     machine_entity_for_recipe,
 )
 
-# Genetic placement: expanded search region (less restrictive), encourage more exploration
 PLACEMENT_X_MIN = 5
+"""Minimum x coordinate for genetic placement region (allows room for bus/inputs)"""
+
 PLACEMENT_X_MAX = 160
+"""Maximum x coordinate for genetic placement region (determines rightward build limit)"""
+
 PLACEMENT_Y_MIN = 4
+"""Minimum y coordinate for genetic placement region (typically avoids base row)"""
+
 PLACEMENT_Y_MAX = 90
-DEFAULT_POPULATION_SIZE = 48
+"""Maximum y coordinate for genetic placement region (vertical build limit)"""
+
+DEFAULT_POPULATION_SIZE = 64
+"""Number of layouts per generation in genetic algorithm"""
+
 MIN_GENERATIONS = 20
+"""Minimum number of generations to run before considering early stopping"""
+
 MAX_GENERATIONS = 2500
-STALE_GENERATIONS_LIMIT = 120  # Fewer stale generations before refresh/stop
-FITNESS_IMPROVEMENT_EPS = 0.5
-# Per-child chance that at least one mutation operator runs
+"""Maximum allowable generations per placement run (absolute cap)"""
+
+STALE_GENERATIONS_LIMIT = 120  
+"""Number of generations to allow without fitness improvement before refresh or stop"""
+
+FITNESS_IMPROVEMENT_EPS = 0.1
+"""Required minimum improvement in layout fitness between stale generations to reset counter"""
+
 MUTATION_RATE = 0.85
-# How many operators to try per mutated child (each may still skip via its own rate)
+"""Per-child probability that at least one mutation operator is applied after crossover"""
+
 MUTATIONS_PER_CHILD_MIN = 1
+"""Minimum number of mutation operators to attempt per mutated child (may still skip some)"""
+
 MUTATIONS_PER_CHILD_MAX = 4
+"""Maximum number of mutation operators to attempt per mutated child"""
 
 GeneticProgressCallback = Callable[[int, float, int, bool], None]
 

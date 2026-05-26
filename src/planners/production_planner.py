@@ -286,17 +286,18 @@ class ProductionPlanner:
                 self.logger.warning("  layout: %s", msg)
 
         entity_number = self._connect_production_stages(entities, entity_number)
-        self._score_layout()
+        self._score_layout(entities)
         self.build_rate_summary(targets)
         return entities, entity_number
 
-    def _score_layout(self):
-        """Evaluate layout quality (machines + estimated I/O; ignores placed belt tiles)."""
+    def _score_layout(self, entities=None):
+        """Evaluate layout quality including belt/inserter flow when entities are given."""
         expected = {item: node.machine_count for item, node in self.nodes.items()}
         self.layout_fitness = evaluate_stage_layout(
             self.stage_machines,
             self.nodes,
-            grid=None,
+            grid=self.grid,
+            entities=entities,
             expected_counts=expected,
         )
         bd = self.layout_fitness
@@ -349,6 +350,6 @@ class ProductionPlanner:
             )
 
         entity_number = self._connect_production_stages(entities, entity_number)
-        self._score_layout()
+        self._score_layout(entities)
         self.build_rate_summary(targets)
         return entities, entity_number
