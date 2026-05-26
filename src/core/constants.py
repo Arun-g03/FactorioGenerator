@@ -23,12 +23,14 @@ TRANSPORT_BELT_THROUGHPUT_PER_MIN = 15 * 60
 
 PRODUCTION_TARGETS = {
     "inserter": 20  # items per minute
+    "inserter": 20  # items per minute
 }
 
 
 def production_rate_suffix():
     """Display suffix for the active production rate unit (e.g. '/min')."""
     return f"/{PRODUCTION_RATE_UNIT}"
+
 
 
 BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone"}
@@ -40,8 +42,22 @@ BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone
 # ---------------------------------------------------------------------------
 FACTORIO_BLUEPRINT_VERSION = 562949958402048
 
+# ---------------------------------------------------------------------------
+# Factorio 2.0 directions (defines.direction — values doubled vs 1.1).
+# Verified in-game: N=0 (omitted in JSON), E=4, S=8, W=12.
+# See wiki Blueprint_string_format and 2.0 mod porting guide.
+# ---------------------------------------------------------------------------
+FACTORIO_BLUEPRINT_VERSION = 562949958402048
+
 DIRECTIONS = {
     "north": 0,
+    "northeast": 2,
+    "east": 4,
+    "southeast": 6,
+    "south": 8,
+    "southwest": 10,
+    "west": 12,
+    "northwest": 14,
     "northeast": 2,
     "east": 4,
     "southeast": 6,
@@ -131,6 +147,7 @@ def direction_for_flow(from_pos, to_pos):
 
 
 def direction_for_inserter(inserter_pos, drop_pos):
+def direction_for_inserter(inserter_pos, drop_pos):
     """
     Blueprint direction for an inserter (Factorio 2.0 cardinals).
 
@@ -185,17 +202,32 @@ PYGAME_TILE_SIZE = 64  # Size of each tile in pixels
 FACTORIO_INSTALL_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Factorio"
 
 
+
 def get_factorio_graphics_path(base_path):
     """Get the full graphics path from the base Factorio installation path."""
     from pathlib import Path
 
+
     return str(Path(base_path) / "data" / "base" / "graphics" / "entity")
+
 
 
 FACTORIO_BASE_GRAPHICS_PATH = get_factorio_graphics_path(FACTORIO_INSTALL_PATH)
 
 # Entity folders under graphics/entity with dedicated sprite loading logic
 BELT_ENTITIES = ("transport-belt", "fast-transport-belt", "express-transport-belt")
+UNDERGROUND_BELT_ENTITIES = (
+    "underground-belt",
+    "fast-underground-belt",
+    "express-underground-belt",
+    "turbo-underground-belt",
+)
+UNDERGROUND_BELT_MAX_UNDERGROUND_TILES = {
+    "underground-belt": 4,
+    "fast-underground-belt": 6,
+    "express-underground-belt": 8,
+    "turbo-underground-belt": 10,
+}
 UNDERGROUND_BELT_ENTITIES = (
     "underground-belt",
     "fast-underground-belt",

@@ -11,6 +11,7 @@ from core.constants import (
     GenerationMode,
     TRANSPORT_BELT_THROUGHPUT_PER_MIN,
     machine_io_stride,
+    machine_io_stride,
 )
 from planners.machine_placer.calculations import (
     ProductionCalculator,
