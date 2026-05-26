@@ -354,9 +354,7 @@ def evaluate_stage_layout(
         for input_start in input_points:
             in_x, in_y = input_start
             drop_x = max(bus_x_start, in_x - 5)
-            drop_x = max(bus_x_start, in_x - 5)
             estimated_belts += _manhattan_path_length(
-                (drop_x, bus_y), (in_x - 1, in_y)
                 (drop_x, bus_y), (in_x - 1, in_y)
             )
 

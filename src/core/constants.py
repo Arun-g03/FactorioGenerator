@@ -22,7 +22,7 @@ class PlacementStrategy(Enum):
 TRANSPORT_BELT_THROUGHPUT_PER_MIN = 15 * 60
 
 PRODUCTION_TARGETS = {
-    "inserter": 20  # items per minute
+   
     "inserter": 20  # items per minute
 }
 
@@ -146,7 +146,7 @@ def direction_for_flow(from_pos, to_pos):
     return FACTORIO_EAST
 
 
-def direction_for_inserter(inserter_pos, drop_pos):
+
 def direction_for_inserter(inserter_pos, drop_pos):
     """
     Blueprint direction for an inserter (Factorio 2.0 cardinals).
