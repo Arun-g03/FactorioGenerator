@@ -491,6 +491,28 @@ class BlueprintRenderer:
         self.camera_x = 0
         self.camera_y = 0
         self.zoom = 1.0
+
+    KEYBOARD_PAN_SPEED = 16
+
+    def update_keyboard_pan(self, *, enabled: bool | None = None, horizontal: bool = True) -> None:
+        """Pan the camera while WASD (and optionally A/D) are held."""
+        if enabled is None:
+            enabled = self._workspace_interactive()
+        if not enabled:
+            return
+        keys = pygame.key.get_pressed()
+        dx = dy = 0
+        if horizontal and keys[pygame.K_a]:
+            dx += self.KEYBOARD_PAN_SPEED
+        if horizontal and keys[pygame.K_d]:
+            dx -= self.KEYBOARD_PAN_SPEED
+        if keys[pygame.K_w]:
+            dy += self.KEYBOARD_PAN_SPEED
+        if keys[pygame.K_s]:
+            dy -= self.KEYBOARD_PAN_SPEED
+        if dx or dy:
+            self.camera_x += dx
+            self.camera_y += dy
     
     def save_screenshot(self):
         """Save a screenshot of the current view."""
@@ -816,6 +838,7 @@ class BlueprintRenderer:
             elif action == "center":
                 self._center_camera_on_blueprint()
 
+            self.update_keyboard_pan()
             self._draw_workspace()
             if self.show_placement_options and self.placement_options_modal:
                 self.placement_options_modal.draw(self.screen)
@@ -856,7 +879,7 @@ class BlueprintRenderer:
             (160, 160, 170),
         )
         sub = pygame.font.Font(None, 24).render(
-            "Place: Rules/Genetic  |  O=options  |  T=targets  |  C=center  |  Scroll zoom, drag pan",
+            "Place: Rules/Genetic  |  O=options  |  T=targets  |  C=center  |  WASD/drag pan  |  Scroll zoom",
             True,
             (120, 120, 130),
         )
@@ -904,7 +927,7 @@ class BlueprintRenderer:
         )
         controls = (
             f"G=Generate | Place:{placement_label} | T=Targets | "
-            "Center=recenter | Scroll=Zoom | Drag=Pan | ESC=Pause"
+            "Center=recenter | WASD=Pan | Scroll=Zoom | Drag=Pan | ESC=Pause"
         )
 
         lines = [info_text, controls]

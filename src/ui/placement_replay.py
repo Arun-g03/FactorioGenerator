@@ -343,6 +343,7 @@ class PlacementReplayViewer:
         while running and result is None:
             result = self.handle_events()
             self._tick_autoplay()
+            self.renderer.update_keyboard_pan(enabled=True, horizontal=False)
             self._draw_canvas()
             self._draw_panel()
             self.screen_manager.flip()

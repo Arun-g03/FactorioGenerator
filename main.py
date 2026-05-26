@@ -64,6 +64,16 @@ def main():
                 )
                 if result == "exit":
                     break
+            elif choice == "assisted_build":
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
+                from src.ui.assisted_build import run_assisted_build_session
+
+                result = run_assisted_build_session(recipes_data)
+                if result == "exit":
+                    break
             elif choice == "replay":
                 logging.basicConfig(
                     level=logging.INFO,

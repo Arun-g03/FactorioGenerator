@@ -14,10 +14,11 @@ except ImportError:
 class Toolbar:
     """Bottom toolbar for blueprint renderer."""
 
-    def __init__(self, width, height, y_position):
+    def __init__(self, width, height, y_position, mode: str = "generate"):
         self.width = width
         self.toolbar_height = 80
         self.y_position = y_position - self.toolbar_height
+        self.mode = mode  # "generate" | "assisted"
         self.logger = logging.getLogger(__name__)
 
         self.bg_color = (30, 30, 40)
@@ -69,22 +70,30 @@ class Toolbar:
         if self.placement_strategy == PlacementStrategy.GENETIC:
             placement_label = "Genetic"
 
-        button_defs = [
-            ("targets", "Targets", button_widths["targets"], self.button_color),
-            ("generate", "Generate", button_widths["generate"], self.generate_color),
-            (
-                "placement",
-                f"Place: {placement_label}",
-                button_widths["placement"],
-                self.placement_genetic_color
-                if self.placement_strategy == PlacementStrategy.GENETIC
-                else (70, 85, 100),
-            ),
-            ("options", "Options", button_widths["options"], (85, 95, 115)),
-            ("center", "Center", button_widths["center"], (70, 110, 130)),
-            ("copy", "Copy BP", button_widths["copy"], self.button_color),
-            ("pause", "Pause", button_widths["pause"], self.button_color),
-        ]
+        if self.mode == "assisted":
+            button_defs = [
+                ("route", "Route all", button_widths["generate"], self.generate_color),
+                ("center", "Center", button_widths["center"], (70, 110, 130)),
+                ("copy", "Copy BP", button_widths["copy"], self.button_color),
+                ("pause", "Pause", button_widths["pause"], self.button_color),
+            ]
+        else:
+            button_defs = [
+                ("targets", "Targets", button_widths["targets"], self.button_color),
+                ("generate", "Generate", button_widths["generate"], self.generate_color),
+                (
+                    "placement",
+                    f"Place: {placement_label}",
+                    button_widths["placement"],
+                    self.placement_genetic_color
+                    if self.placement_strategy == PlacementStrategy.GENETIC
+                    else (70, 85, 100),
+                ),
+                ("options", "Options", button_widths["options"], (85, 95, 115)),
+                ("center", "Center", button_widths["center"], (70, 110, 130)),
+                ("copy", "Copy BP", button_widths["copy"], self.button_color),
+                ("pause", "Pause", button_widths["pause"], self.button_color),
+            ]
 
         mouse_pos = pygame.mouse.get_pos()
         self.buttons = {}
@@ -97,7 +106,7 @@ class Toolbar:
             x += width + button_spacing
 
             is_hovered = rect.collidepoint(mouse_pos)
-            if name == "generate":
+            if name in ("generate", "route"):
                 color = self.generate_hover_color if is_hovered else base_color
             elif name == "placement":
                 color = (

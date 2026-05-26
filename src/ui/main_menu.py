@@ -53,10 +53,11 @@ class MainMenu:
     def setup_menu(self):
         """Set up menu buttons."""
         self.buttons = [
-            {"text": "Start", "action": "generate", "y": 180},
-            {"text": "Placement Replay", "action": "replay", "y": 250},
-            {"text": "Settings", "action": "settings", "y": 320},
-            {"text": "Exit", "action": "exit", "y": 390},
+            {"text": "Start", "action": "generate", "y": 160},
+            {"text": "Assisted Build", "action": "assisted_build", "y": 220},
+            {"text": "Placement Replay", "action": "replay", "y": 280},
+            {"text": "Settings", "action": "settings", "y": 340},
+            {"text": "Exit", "action": "exit", "y": 400},
         ]
     
     def get_button_rect(self, button_info):
