@@ -151,6 +151,30 @@
           "advanced-circuit": 45
         }
       },
+      "wooden-chest": {
+        "type": "storage",
+        "size": [1, 1],
+        "inventory_slots": 16,
+        "ingredients": {
+          "wood": 2
+        }
+      },
+      "iron-chest": {
+        "type": "storage",
+        "size": [1, 1],
+        "inventory_slots": 32,
+        "ingredients": {
+          "iron-plate": 8
+        }
+      },
+      "steel-chest": {
+        "type": "storage",
+        "size": [1, 1],
+        "inventory_slots": 48,
+        "ingredients": {
+          "steel-plate": 8
+        }
+      },
       "logistic-chest-active-provider": {
         "type": "logistics",
         "size": [1, 1],
@@ -242,30 +266,106 @@
         }
       },
       "splitter": {
-        "type": "logistics",
+        "type": "splitter",
         "size": [2, 1],
+        "lanes": 2,
+        "belt_speed": 15,
+        "behavior": "balance",
         "ingredients": {
           "iron-plate": 5,
           "iron-gear-wheel": 5,
           "electronic-circuit": 2
+        },
+        "io": {
+          "default_direction": 0,
+          "note": "Two belts in on one 2-wide side, two belts out on the opposite side. 50/50 split or merge; prefers the open lane when one side is full.",
+          "facing_north": {
+            "direction": 0,
+            "input_tiles": [[0, -1], [1, -1]],
+            "output_tiles": [[0, 1], [1, 1]]
+          },
+          "facing_south": {
+            "direction": 8,
+            "input_tiles": [[0, 1], [1, 1]],
+            "output_tiles": [[0, -1], [1, -1]]
+          }
         }
       },
       "fast-splitter": {
-        "type": "logistics",
+        "type": "splitter",
         "size": [2, 1],
+        "lanes": 2,
+        "belt_speed": 30,
+        "behavior": "balance",
         "ingredients": {
           "splitter": 1,
           "iron-gear-wheel": 10,
           "electronic-circuit": 10
+        },
+        "io": {
+          "default_direction": 0,
+          "facing_north": {
+            "direction": 0,
+            "input_tiles": [[0, -1], [1, -1]],
+            "output_tiles": [[0, 1], [1, 1]]
+          },
+          "facing_south": {
+            "direction": 8,
+            "input_tiles": [[0, 1], [1, 1]],
+            "output_tiles": [[0, -1], [1, -1]]
+          }
         }
       },
       "express-splitter": {
-        "type": "logistics",
+        "type": "splitter",
         "size": [2, 1],
+        "lanes": 2,
+        "belt_speed": 45,
+        "behavior": "balance",
         "ingredients": {
           "fast-splitter": 1,
           "iron-gear-wheel": 10,
           "lubricant": 1
+        },
+        "io": {
+          "default_direction": 0,
+          "facing_north": {
+            "direction": 0,
+            "input_tiles": [[0, -1], [1, -1]],
+            "output_tiles": [[0, 1], [1, 1]]
+          },
+          "facing_south": {
+            "direction": 8,
+            "input_tiles": [[0, 1], [1, 1]],
+            "output_tiles": [[0, -1], [1, -1]]
+          }
+        }
+      },
+      "turbo-splitter": {
+        "type": "splitter",
+        "size": [2, 1],
+        "lanes": 2,
+        "belt_speed": 60,
+        "behavior": "balance",
+        "expansion": "space-age",
+        "ingredients": {
+          "express-splitter": 1,
+          "tungsten-plate": 15,
+          "processing-unit": 2,
+          "lubricant": 80
+        },
+        "io": {
+          "default_direction": 0,
+          "facing_north": {
+            "direction": 0,
+            "input_tiles": [[0, -1], [1, -1]],
+            "output_tiles": [[0, 1], [1, 1]]
+          },
+          "facing_south": {
+            "direction": 8,
+            "input_tiles": [[0, 1], [1, 1]],
+            "output_tiles": [[0, -1], [1, -1]]
+          }
         }
       },
       "inserter": {

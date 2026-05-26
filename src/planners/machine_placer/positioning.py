@@ -23,15 +23,16 @@ class PositionFinder:
             for x in range(start_x, min(start_x + 50, self.grid.width - width)):
                 # Check if the machine itself can be placed
                 if not self.grid.is_occupied(x, y, width, height):
-                    # Layout: [3 input belts] [machine] [3 output belts]
-                    # Total width needed: 3 + width + 3 = 6 + width
-                    total_width_needed = 6 + width
-                    
+                    # Layout: [3 belts][inserter][machine][inserter][3 belts] → width + 8 tiles
+                    from core.constants import MACHINE_IO_WEST_TILES, machine_io_stride
+
+                    total_width_needed = machine_io_stride(width)
+
                     # Check bounds
-                    if x >= 3 and x + total_width_needed < self.grid.width:
+                    if x >= MACHINE_IO_WEST_TILES and x + total_width_needed < self.grid.width:
                         # Check if the entire area is clear
                         clear = True
-                        for check_x in range(x - 3, x + total_width_needed):
+                        for check_x in range(x - MACHINE_IO_WEST_TILES, x + total_width_needed):
                             for check_y in range(y, y + height):
                                 if self.grid.is_occupied(check_x, check_y):
                                     clear = False

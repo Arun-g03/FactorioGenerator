@@ -1,6 +1,11 @@
 import logging
 
-from core.constants import GenerationMode, PlacementStrategy, PRODUCTION_TARGETS
+from core.constants import (
+    FACTORIO_BLUEPRINT_VERSION,
+    GenerationMode,
+    PlacementStrategy,
+    PRODUCTION_TARGETS,
+)
 from planners.production_planner import ProductionPlanner
 
 
@@ -76,6 +81,6 @@ class BlueprintManager:
                 "icons": [{"signal": {"name": "stone-furnace"}, "index": 1}],
                 "entities": entities,
                 "item": "blueprint",
-                "version": 281479276889473,
+                "version": FACTORIO_BLUEPRINT_VERSION,
             }
         }

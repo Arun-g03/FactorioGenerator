@@ -11,8 +11,8 @@ class InserterPlacer:
         return entity_number + 1
 
 
-    def get_direction(self, source_x, source_y, target_x, target_y):
-        """Blueprint direction from pickup tile to drop tile (cardinals only)."""
+    def get_direction(self, inserter_x, inserter_y, drop_x, drop_y):
+        """Blueprint direction: inserter faces drop tile (pickup is behind)."""
         from core.constants import direction_for_inserter
 
-        return direction_for_inserter((source_x, source_y), (target_x, target_y))
+        return direction_for_inserter((inserter_x, inserter_y), (drop_x, drop_y))

@@ -200,24 +200,10 @@ class BlueprintRenderer:
         return screen_x + offset_x, screen_y + offset_y
 
     def _direction_to_arrow_vector(self, direction):
-        """Map cardinal Factorio direction (0,2,4,6) to a screen-space unit vector."""
-        vectors = {
-            0: (0, -1),
-            2: (1, 0),
-            4: (0, 1),
-            6: (-1, 0),
-        }
-        if direction in vectors:
-            dx, dy = vectors[direction]
-            length = max((dx * dx + dy * dy) ** 0.5, 1.0)
-            return dx / length, dy / length
-        suffix = SpriteMapper.CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
-        return {
-            "north": (0, -1),
-            "east": (1, 0),
-            "south": (0, 1),
-            "west": (-1, 0),
-        }.get(suffix, (1, 0))
+        """Map Factorio blueprint direction to a screen-space unit vector."""
+        from core.constants import direction_arrow_vector
+
+        return direction_arrow_vector(direction)
 
     def _draw_inserter_direction_arrow(self, tile_screen_x, tile_screen_y, direction):
         """Draw a direction arrow over an inserter tile."""

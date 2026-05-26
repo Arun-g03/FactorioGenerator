@@ -98,7 +98,7 @@ class ContinuousBeltPlacer:
                 "icons": [{"signal": {"name": "transport-belt"}, "index": 1}],
                 "entities": entities,
                 "item": "blueprint",
-                "version": 281479276889473
+                "version": 562949958402048
             }
         }
         return encode_blueprint(blueprint)

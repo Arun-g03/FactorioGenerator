@@ -22,7 +22,7 @@ class PlacementStrategy(Enum):
 TRANSPORT_BELT_THROUGHPUT_PER_MIN = 15 * 60
 
 PRODUCTION_TARGETS = {
-   "inserter": 20  # items per minute
+    "inserter": 20  # items per minute
 }
 
 
@@ -30,41 +30,84 @@ def production_rate_suffix():
     """Display suffix for the active production rate unit (e.g. '/min')."""
     return f"/{PRODUCTION_RATE_UNIT}"
 
+
 BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone"}
 
-# Factorio blueprint / map-exchange directions (0–7, 45° steps).
-# See https://wiki.factorio.com/Types/Direction
+# ---------------------------------------------------------------------------
+# Factorio 2.0 directions (defines.direction — values doubled vs 1.1).
+# Verified in-game: N=0 (omitted in JSON), E=4, S=8, W=12.
+# See wiki Blueprint_string_format and 2.0 mod porting guide.
+# ---------------------------------------------------------------------------
+FACTORIO_BLUEPRINT_VERSION = 562949958402048
+
 DIRECTIONS = {
     "north": 0,
-    "northeast": 1,
-    "east": 2,
-    "southeast": 3,
-    "south": 4,
-    "southwest": 5,
-    "west": 6,
-    "northwest": 7,
+    "northeast": 2,
+    "east": 4,
+    "southeast": 6,
+    "south": 8,
+    "southwest": 10,
+    "west": 12,
+    "northwest": 14,
 }
 
-FACTORIO_NORTH = 0
-FACTORIO_NORTHEAST = 1
-FACTORIO_EAST = 2
-FACTORIO_SOUTHEAST = 3
-FACTORIO_SOUTH = 4
-FACTORIO_SOUTHWEST = 5
-FACTORIO_WEST = 6
-FACTORIO_NORTHWEST = 7
+# Named constants (same values as DIRECTIONS; use for readable imports).
+FACTORIO_NORTH = DIRECTIONS["north"]
+FACTORIO_NORTHEAST = DIRECTIONS["northeast"]
+FACTORIO_EAST = DIRECTIONS["east"]
+FACTORIO_SOUTHEAST = DIRECTIONS["southeast"]
+FACTORIO_SOUTH = DIRECTIONS["south"]
+FACTORIO_SOUTHWEST = DIRECTIONS["southwest"]
+FACTORIO_WEST = DIRECTIONS["west"]
+FACTORIO_NORTHWEST = DIRECTIONS["northwest"]
+
+CARDINAL_NAMES = ("north", "east", "south", "west")
+
+# Blueprint cardinals used by inserters and belt flow helpers.
+CARDINAL_DIRECTIONS = tuple(DIRECTIONS[name] for name in CARDINAL_NAMES)
+INSERTER_DIRECTIONS = CARDINAL_DIRECTIONS
+
+# Grid offset from an entity tile to its front (drop / flow) neighbor.
+DIRECTION_FRONT_OFFSET = {
+    FACTORIO_NORTH: (0, -1),
+    FACTORIO_EAST: (1, 0),
+    FACTORIO_SOUTH: (0, 1),
+    FACTORIO_WEST: (-1, 0),
+}
+
+# Pygame sprite suffix for each blueprint direction (diagonals map to nearest cardinal).
+CARDINAL_DIRECTION_SUFFIX = {
+    None: "north",
+    FACTORIO_NORTH: "north",
+    FACTORIO_NORTHEAST: "north",
+    FACTORIO_EAST: "east",
+    FACTORIO_SOUTHEAST: "east",
+    FACTORIO_SOUTH: "south",
+    FACTORIO_SOUTHWEST: "south",
+    FACTORIO_WEST: "west",
+    FACTORIO_NORTHWEST: "west",
+}
+
+# Screen-space unit vectors for UI arrows (y increases downward on screen).
+CARDINAL_ARROW_VECTOR = {
+    "north": (0, -1),
+    "east": (1, 0),
+    "south": (0, 1),
+    "west": (-1, 0),
+}
 
 
-# Inserters only use cardinals (0, 2, 4, 6) in blueprints.
-INSERTER_DIRECTIONS = (
-    FACTORIO_NORTH,
-    FACTORIO_EAST,
-    FACTORIO_SOUTH,
-    FACTORIO_WEST,
-)
+def direction_sprite_suffix(direction):
+    """Map a Factorio blueprint direction to a cardinal sprite name (north/east/south/west)."""
+    return CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
 
-# Factorio blueprint inserter direction is rotated 90° CW vs pick-up→drop facing.
-INSERTER_BLUEPRINT_ROTATION_OFFSET = 2
+
+def direction_arrow_vector(direction):
+    """Unit (dx, dy) for drawing an inserter flow arrow in the Pygame preview."""
+    suffix = direction_sprite_suffix(direction)
+    dx, dy = CARDINAL_ARROW_VECTOR[suffix]
+    length = max((dx * dx + dy * dy) ** 0.5, 1.0)
+    return dx / length, dy / length
 
 
 def direction_for_flow(from_pos, to_pos):
@@ -87,23 +130,38 @@ def direction_for_flow(from_pos, to_pos):
     return FACTORIO_EAST
 
 
-def direction_for_inserter(pickup_pos, drop_pos):
+def direction_for_inserter(inserter_pos, drop_pos):
     """
-    Blueprint direction for an inserter (cardinals only).
+    Blueprint direction for an inserter (Factorio 2.0 cardinals).
 
-    The inserter faces drop_pos and picks from the opposite side of pickup_pos.
-    Stored values include INSERTER_BLUEPRINT_ROTATION_OFFSET so pasted blueprints
-    match in-game arm orientation.
+    The inserter faces drop_pos (front) and picks up from the tile behind it.
     """
-    facing = direction_for_flow(pickup_pos, drop_pos)
-    return (facing + INSERTER_BLUEPRINT_ROTATION_OFFSET) % 8
+    return direction_for_flow(inserter_pos, drop_pos)
+
+
+def inserter_pickup_tile(inserter_pos, blueprint_direction):
+    """Grid tile behind the inserter (where items are picked up)."""
+    ix, iy = inserter_pos
+    dx, dy = DIRECTION_FRONT_OFFSET.get(blueprint_direction, DIRECTION_FRONT_OFFSET[FACTORIO_EAST])
+    return ix - dx, iy - dy
 
 
 def inserter_direction_for_display(blueprint_direction):
-    """Map stored inserter direction to pick-up→drop facing for UI arrows."""
+    """Blueprint direction for UI arrows (Factorio 2.0 value; None → north)."""
     if blueprint_direction is None:
-        return FACTORIO_EAST
-    return (int(blueprint_direction) - INSERTER_BLUEPRINT_ROTATION_OFFSET) % 8
+        return FACTORIO_NORTH
+    return int(blueprint_direction)
+
+
+# Horizontal tiles per machine I/O block: 4 west + machine_w + 4 east (belts + inserters).
+MACHINE_IO_WEST_TILES = 4
+MACHINE_IO_EAST_TILES = 4
+
+
+def machine_io_stride(machine_w: int) -> int:
+    """Minimum horizontal gap between machine origin columns (no shared I/O tiles)."""
+    return machine_w + MACHINE_IO_WEST_TILES + MACHINE_IO_EAST_TILES
+
 
 # Pygame visualization settings
 PYGAME_WINDOW_WIDTH = 1280
@@ -111,26 +169,32 @@ PYGAME_WINDOW_HEIGHT = 720
 PYGAME_TILE_SIZE = 64  # Size of each tile in pixels
 
 # Factorio installation path (base directory)
-# Users should provide the root Factorio installation directory
-# The tool will automatically append: data/base/graphics/entity
-# Windows Steam default:
 FACTORIO_INSTALL_PATH = r"C:\Program Files (x86)\Steam\steamapps\common\Factorio"
-# Alternative paths:
-# Windows GOG: C:\GOG Games\Factorio
-# Linux Steam: ~/.steam/steam/steamapps/common/Factorio
-# Mac: ~/Library/Application Support/Steam/steamapps/common/Factorio
+
 
 def get_factorio_graphics_path(base_path):
     """Get the full graphics path from the base Factorio installation path."""
     from pathlib import Path
+
     return str(Path(base_path) / "data" / "base" / "graphics" / "entity")
 
-# Default full graphics path (for backward compatibility)
+
 FACTORIO_BASE_GRAPHICS_PATH = get_factorio_graphics_path(FACTORIO_INSTALL_PATH)
 
 # Entity folders under graphics/entity with dedicated sprite loading logic
 BELT_ENTITIES = ("transport-belt", "fast-transport-belt", "express-transport-belt")
-UNDERGROUND_BELT_ENTITIES = ("underground-belt", "fast-underground-belt", "express-underground-belt")
+UNDERGROUND_BELT_ENTITIES = (
+    "underground-belt",
+    "fast-underground-belt",
+    "express-underground-belt",
+    "turbo-underground-belt",
+)
+UNDERGROUND_BELT_MAX_UNDERGROUND_TILES = {
+    "underground-belt": 4,
+    "fast-underground-belt": 6,
+    "express-underground-belt": 8,
+    "turbo-underground-belt": 10,
+}
 INSERTER_ENTITIES = (
     "inserter",
     "fast-inserter",
@@ -138,4 +202,3 @@ INSERTER_ENTITIES = (
     "burner-inserter",
     "bulk-inserter",
 )
-

@@ -2,7 +2,12 @@
 
 import logging
 
-from core.constants import BASE_MATERIALS, FACTORIO_EAST, direction_for_flow
+from core.constants import (
+    BASE_MATERIALS,
+    FACTORIO_EAST,
+    UNDERGROUND_BELT_MAX_UNDERGROUND_TILES,
+    direction_for_flow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +15,7 @@ logger = logging.getLogger(__name__)
 BASE_BUS_Y = 6
 BASE_BUS_X_START = 8
 BASE_BUS_LENGTH = 40
+BLUEPRINT_START_CHEST = "wooden-chest"
 
 
 def machine_io_lanes(machine_x, machine_y, width, height):
@@ -70,20 +76,197 @@ def _place_belt(grid, entities, entity_number, x, y, direction):
     return entity_number + 1
 
 
+def _place_storage_chest(grid, entities, entity_number, x, y, name=BLUEPRINT_START_CHEST):
+    """Place a 1x1 chest if the tile is free."""
+    if grid.is_occupied(x, y):
+        return entity_number
+    entities.append({
+        "entity_number": entity_number,
+        "name": name,
+        "position": {"x": x, "y": y},
+    })
+    grid.occupy(x, y, name, [1, 1])
+    return entity_number + 1
+
+
+def _place_underground_pair(
+    grid,
+    entities,
+    entity_number,
+    input_pos,
+    output_pos,
+    direction,
+    name="underground-belt",
+):
+    """
+    Place one underground input/output pair for a straight run.
+
+    Only endpoints occupy surface tiles; intervening underground span is clear.
+    """
+    input_x, input_y = input_pos
+    output_x, output_y = output_pos
+
+    if input_x != output_x and input_y != output_y:
+        return entity_number
+    if direction_for_flow(input_pos, output_pos) != direction:
+        return entity_number
+
+    span_tiles = abs(output_x - input_x) + abs(output_y - input_y) - 1
+    max_tiles = UNDERGROUND_BELT_MAX_UNDERGROUND_TILES.get(name, 4)
+    if span_tiles < 1 or span_tiles > max_tiles:
+        return entity_number
+
+    if grid.is_occupied(input_x, input_y) or grid.is_occupied(output_x, output_y):
+        return entity_number
+
+    entities.append({
+        "entity_number": entity_number,
+        "name": name,
+        "position": {"x": input_x, "y": input_y},
+        "direction": direction,
+        "type": "input",
+    })
+    grid.occupy(input_x, input_y, name, [1, 1])
+    entity_number += 1
+
+    entities.append({
+        "entity_number": entity_number,
+        "name": name,
+        "position": {"x": output_x, "y": output_y},
+        "direction": direction,
+        "type": "output",
+    })
+    grid.occupy(output_x, output_y, name, [1, 1])
+    entity_number += 1
+    return entity_number
+
+
 def place_belt_path(grid, entities, entity_number, path):
-    """Place belts along a tile path with correct flow directions."""
+    """
+    Place belts along a tile path with correct flow directions.
+
+    If a straight segment is blocked, bridge it with an underground-belt pair
+    when the run satisfies vanilla underground constraints.
+    """
     if len(path) < 2:
         return entity_number
 
-    for index, (x, y) in enumerate(path[:-1]):
+    index = 0
+    while index < len(path) - 1:
+        x, y = path[index]
         direction = _belt_direction_at(path, index)
+
+        if grid.is_occupied(x, y):
+            index += 1
+            continue
+
+        next_x, next_y = path[index + 1]
+        if not grid.is_occupied(next_x, next_y):
+            entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
+            index += 1
+            continue
+
+        # Try to jump a contiguous blocked run in this same direction.
+        blocked_end = index + 1
+        while blocked_end < len(path) and grid.is_occupied(*path[blocked_end]):
+            if blocked_end > index + 1:
+                prev_step = direction_for_flow(path[blocked_end - 1], path[blocked_end])
+                if prev_step != direction:
+                    break
+            blocked_end += 1
+
+        if blocked_end >= len(path):
+            entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
+            index += 1
+            continue
+
+        if blocked_end > index + 1:
+            step_to_exit = direction_for_flow(path[blocked_end - 1], path[blocked_end])
+            if step_to_exit == direction and not grid.is_occupied(*path[blocked_end]):
+                updated = _place_underground_pair(
+                    grid,
+                    entities,
+                    entity_number,
+                    (x, y),
+                    path[blocked_end],
+                    direction,
+                    name="underground-belt",
+                )
+                if updated != entity_number:
+                    entity_number = updated
+                    index = blocked_end
+                    continue
+
         entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
+        index += 1
 
     last_x, last_y = path[-1]
-    prev_x, prev_y = path[-2]
-    direction = direction_for_flow((prev_x, prev_y), (last_x, last_y))
-    entity_number = _place_belt(grid, entities, entity_number, last_x, last_y, direction)
+    if not grid.is_occupied(last_x, last_y):
+        prev_x, prev_y = path[-2]
+        direction = direction_for_flow((prev_x, prev_y), (last_x, last_y))
+        entity_number = _place_belt(grid, entities, entity_number, last_x, last_y, direction)
     return entity_number
+
+
+def _place_splitter(
+    grid,
+    entities,
+    entity_number,
+    x,
+    y,
+    direction,
+    name="splitter",
+):
+    """
+    Place a Factorio splitter with correct footprint (2x1).
+
+    Notes:
+    - Blueprint encoding converts planner top-left tile coords to entity centers.
+    - Grid occupancy uses 2x1 so belts won't be placed on top of the splitter.
+    """
+    if grid.is_occupied(x, y, width=2, height=1):
+        return entity_number
+
+    entities.append(
+        {
+            "entity_number": entity_number,
+            "name": name,
+            "position": {"x": x, "y": y},
+            "direction": direction,
+        }
+    )
+    grid.occupy(x, y, name, [2, 1])
+    return entity_number + 1
+
+
+def _connection_target_key(req):
+    """Unique consumer lane endpoint for a producer→consumer belt request."""
+    return (req["consumer_item"], req["consumer_input_start"], req["target_y"])
+
+
+def _dedupe_connection_requests(requests):
+    """Drop duplicate routes to the same consumer lane from the same ingredient."""
+    seen = set()
+    unique = []
+    for req in requests:
+        key = (_connection_target_key(req), req["dep"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(req)
+    return unique
+
+
+def _needs_splitter_fanout(requests):
+    """
+    True only when one producer output must reach two or more distinct consumer lanes.
+
+    A single consumer with one ingredient, or duplicate requests, does not need a splitter.
+    """
+    if len(requests) < 2:
+        return False
+    targets = {_connection_target_key(req) for req in requests}
+    return len(targets) >= 2
 
 
 def connect_lane_to_lane(
@@ -141,11 +324,17 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
         if lanes:
             stage_lanes[item] = lanes
 
-    for item, node in nodes.items():
-        if item not in stage_lanes:
+    # Collect all requested lane connections first so we can place splitters
+    # when a single producer output must feed multiple consumer lanes.
+    requests_by_producer: dict[
+        tuple[int, int], list[dict]
+    ] = {}
+
+    for consumer_item, node in nodes.items():
+        if consumer_item not in stage_lanes:
             continue
 
-        consumer_lanes = stage_lanes[item]
+        consumer_lanes = stage_lanes[consumer_item]
         ingredient_index = 0
 
         for dep in node.dependencies:
@@ -155,15 +344,91 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
                 continue
 
             producer_lanes = stage_lanes[dep]
-            entity_number = connect_lane_to_lane(
-                grid,
-                entities,
-                entity_number,
-                producer_lanes["output_end"],
-                consumer_lanes["input_start"],
-                lane_offset=ingredient_index * 2,
+            producer_output_end = producer_lanes["output_end"]
+            consumer_input_start = consumer_lanes["input_start"]
+            lane_offset = ingredient_index * 2
+            target_y = consumer_input_start[1] + lane_offset
+
+            requests_by_producer.setdefault(producer_output_end, []).append(
+                {
+                    "consumer_input_start": consumer_input_start,
+                    "target_y": target_y,
+                    "lane_offset": lane_offset,
+                    "consumer_item": consumer_item,
+                    "dep": dep,
+                }
             )
             ingredient_index += 1
+
+    for producer_output_end, requests in requests_by_producer.items():
+        requests = _dedupe_connection_requests(requests)
+        out_x, out_y = producer_output_end
+
+        if not _needs_splitter_fanout(requests):
+            for req in requests:
+                entity_number = connect_lane_to_lane(
+                    grid,
+                    entities,
+                    entity_number,
+                    producer_output_end,
+                    req["consumer_input_start"],
+                    lane_offset=req["lane_offset"],
+                )
+            continue
+
+        # Fan-out: one producer output → multiple consumer stages; use a splitter.
+        splitter_x = out_x + 1
+        splitter_y = out_y
+        before = entity_number
+        entity_number = _place_splitter(
+            grid,
+            entities,
+            entity_number,
+            splitter_x,
+            splitter_y,
+            direction=FACTORIO_EAST,
+            name="splitter",
+        )
+
+        if entity_number == before:
+            logger.warning(
+                "Splitter needed at %s but tiles occupied; using belt fallback",
+                producer_output_end,
+            )
+            for req in requests:
+                entity_number = connect_lane_to_lane(
+                    grid,
+                    entities,
+                    entity_number,
+                    producer_output_end,
+                    req["consumer_input_start"],
+                    lane_offset=req["lane_offset"],
+                )
+            continue
+
+        logger.info(
+            "Placed splitter at (%s, %s) for %s consumer lane(s) from %s",
+            splitter_x,
+            splitter_y,
+            len(requests),
+            producer_output_end,
+        )
+
+        splitter_exit_x = out_x + 3
+        for req in requests:
+            in_x, in_y = req["consumer_input_start"]
+            target_y = req["target_y"]
+
+            path = _manhattan_path((splitter_exit_x, target_y), (in_x - 1, target_y))
+            entity_number = place_belt_path(grid, entities, entity_number, path)
+
+            if req["lane_offset"] != 0:
+                merge_path = _manhattan_path(
+                    (in_x - 1, target_y), (in_x - 1, in_y)
+                )
+                entity_number = place_belt_path(
+                    grid, entities, entity_number, merge_path
+                )
 
     return entity_number
 
@@ -171,6 +436,9 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
 def connect_base_materials(grid, entities, entity_number, stage_machines, nodes):
     """
     Place a top resource bus and route base materials into stages that need them.
+
+    The first tile of the topmost bus is a wooden chest marking the blueprint start;
+    belts run east from the next tile and drop lines snake to each stage input.
     """
     base_demands = {}
     for item, node in nodes.items():
@@ -184,23 +452,38 @@ def connect_base_materials(grid, entities, entity_number, stage_machines, nodes)
                 base_demands.setdefault(dep, []).append(lanes["input_start"])
 
     if not base_demands:
-        return entity_number
+        return entity_number, None
 
+    blueprint_start = (BASE_BUS_X_START, BASE_BUS_Y)
     bus_index = 0
+
     for resource, input_points in base_demands.items():
         bus_y = BASE_BUS_Y + bus_index * 2
-        bus_index += 1
+        bus_x_start = BASE_BUS_X_START
 
-        for belt_x in range(BASE_BUS_X_START, BASE_BUS_X_START + BASE_BUS_LENGTH):
+        if bus_index == 0:
+            entity_number = _place_storage_chest(
+                grid, entities, entity_number, bus_x_start, bus_y
+            )
+            bus_x_start = BASE_BUS_X_START + 1
+            logger.info(
+                "Blueprint start chest at (%s, %s)",
+                BASE_BUS_X_START,
+                bus_y,
+            )
+
+        for belt_x in range(bus_x_start, BASE_BUS_X_START + BASE_BUS_LENGTH):
             entity_number = _place_belt(
                 grid, entities, entity_number, belt_x, bus_y, FACTORIO_EAST
             )
 
         for input_start in input_points:
             in_x, in_y = input_start
-            drop_x = max(BASE_BUS_X_START, in_x - 5)
+            drop_x = max(bus_x_start, in_x - 5)
             path = _manhattan_path((drop_x, bus_y), (in_x - 1, in_y))
             entity_number = place_belt_path(grid, entities, entity_number, path)
             logger.info("Routed base material %s bus to %s", resource, input_start)
 
-    return entity_number
+        bus_index += 1
+
+    return entity_number, blueprint_start
