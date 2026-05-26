@@ -21,14 +21,15 @@ PREFERRED_STAGE_Y = 15
 BELTS_PER_MACHINE = 6
 
 # Reference raw penalties per machine for 0–100 efficiency normalization
-REF_FOOTPRINT_PER_MACHINE = 45.0
+REF_FOOTPRINT_PER_MACHINE = 120.0
 REF_BELT_TILES_PER_MACHINE = 35.0
 REF_LAYOUT_PER_MACHINE = 8.0
 
+# Network factories: short connections matter more than compact bounding boxes.
 EFFICIENCY_WEIGHTS = {
-    "footprint": 0.45,
-    "belts": 0.40,
-    "layout": 0.15,
+    "footprint": 0.15,
+    "belts": 0.55,
+    "layout": 0.30,
 }
 
 
@@ -75,6 +76,7 @@ class LayoutFitnessBreakdown:
         self.raw_efficiency_penalty = (
             self.footprint_penalty
             + self.estimated_belts_penalty
+            + self.connection_penalty
             + self.outlier_penalty
             + self.stage_cluster_penalty
             + self.bus_alignment_penalty
@@ -150,7 +152,8 @@ def _normalized_efficiency_scores(
     footprint_raw = abs(breakdown.footprint_penalty)
     belt_raw = float(breakdown.estimated_belt_tiles)
     layout_raw = abs(
-        breakdown.outlier_penalty
+        breakdown.connection_penalty
+        + breakdown.outlier_penalty
         + breakdown.stage_cluster_penalty
         + breakdown.bus_alignment_penalty
     )
@@ -223,7 +226,7 @@ def evaluate_stage_layout(
     nodes: dict,
     grid=None,
     *,
-    preferred_stage_y: int = PREFERRED_STAGE_Y,
+    preferred_stage_y: int | None = PREFERRED_STAGE_Y,
     expected_counts: dict[str, int] | None = None,
 ) -> LayoutFitnessBreakdown:
     """
@@ -334,12 +337,6 @@ def evaluate_stage_layout(
             producer_out = producer["output_end"]
             target_in = (consumer_in[0], consumer_in[1] + ingredient_index * 2)
 
-            if producer_out[0] >= target_in[0]:
-                _add_blocker(
-                    breakdown,
-                    f"backward belt route: {dep} cannot feed {item} (east flow)",
-                )
-
             route_start = (producer_out[0] + 1, producer_out[1])
             route_end = (target_in[0] - 1, target_in[1])
             estimated_belts += max(_manhattan_path_length(route_start, route_end), 0)
@@ -352,8 +349,8 @@ def evaluate_stage_layout(
 
     for bus_index, (resource, input_points) in enumerate(base_material_feeds.items()):
         bus_y = BASE_BUS_Y + bus_index * 2
-        bus_x_start = BASE_BUS_X_START + (1 if bus_index == 0 else 0)
-        estimated_belts += BASE_BUS_LENGTH - (1 if bus_index == 0 else 0)
+        bus_x_start = BASE_BUS_X_START + 1  # chest on first tile of each bus
+        estimated_belts += BASE_BUS_LENGTH - 1
         for input_start in input_points:
             in_x, in_y = input_start
             drop_x = max(bus_x_start, in_x - 5)
@@ -395,8 +392,8 @@ def evaluate_stage_layout(
         factory_cy = sum(c[1] for c in centers) / len(centers)
         for cx, cy in centers:
             dist = abs(cx - factory_cx) + abs(cy - factory_cy)
-            if dist > 25:
-                breakdown.outlier_penalty -= (dist - 25) * 1.0
+            if dist > 200:
+                breakdown.outlier_penalty -= (dist - 200) * 0.05
 
     for _item, machines in stage_machines.items():
         if len(machines) < 2:
@@ -408,14 +405,15 @@ def evaluate_stage_layout(
         )
         breakdown.stage_cluster_penalty -= spread * 0.15
 
-    for item, node in nodes.items():
-        if item not in stage_machines:
-            continue
-        needs_bus = any(dep in BASE_MATERIALS for dep in node.dependencies)
-        if not needs_bus:
-            continue
-        avg_y = sum(m[1] for m in stage_machines[item]) / len(stage_machines[item])
-        breakdown.bus_alignment_penalty -= abs(avg_y - preferred_stage_y) * 0.5
+    if preferred_stage_y is not None:
+        for item, node in nodes.items():
+            if item not in stage_machines:
+                continue
+            needs_bus = any(dep in BASE_MATERIALS for dep in node.dependencies)
+            if not needs_bus:
+                continue
+            avg_y = sum(m[1] for m in stage_machines[item]) / len(stage_machines[item])
+            breakdown.bus_alignment_penalty -= abs(avg_y - preferred_stage_y) * 0.2
 
     machine_count = sum(len(machines) for machines in stage_machines.values())
     breakdown._finalize_total(machine_count)

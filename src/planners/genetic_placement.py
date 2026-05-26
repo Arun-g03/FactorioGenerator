@@ -11,16 +11,20 @@ from typing import Callable
 from core.generationalAlgorithm import select_top_layouts
 from planners.layout_fitness import LayoutFitnessBreakdown, evaluate_machine_positions
 from planners.machine_io import place_machine_io_block
+from planners.machine_placer.calculations import (
+    entity_accepts_recipe_field,
+    machine_entity_for_recipe,
+)
 
-# Placement search region (after ingredient bus at top)
-PLACEMENT_X_MIN = 15
-PLACEMENT_X_MAX = 90
-PLACEMENT_Y_MIN = 12
-PLACEMENT_Y_MAX = 55
+# Genetic placement: expanded search region (less restrictive), encourage more exploration
+PLACEMENT_X_MIN = 5
+PLACEMENT_X_MAX = 160
+PLACEMENT_Y_MIN = 4
+PLACEMENT_Y_MAX = 90
 DEFAULT_POPULATION_SIZE = 48
 MIN_GENERATIONS = 20
 MAX_GENERATIONS = 2500
-STALE_GENERATIONS_LIMIT = 40
+STALE_GENERATIONS_LIMIT = 120  # Fewer stale generations before refresh/stop
 FITNESS_IMPROVEMENT_EPS = 0.5
 # Per-child chance that at least one mutation operator runs
 MUTATION_RATE = 0.85
@@ -438,7 +442,7 @@ def place_machines_from_genetic_layout(planner, entities, entity_number, machine
             item = pos_item
             recipe = planner.nodes[item].recipe if item in planner.nodes else recipe
 
-        machine_name = recipe.get("machine", "assembling-machine-1")
+        machine_name = machine_entity_for_recipe(item, recipe)
         w, h = recipe.get("machine_size", [3, 3])
 
         if planner.grid.is_occupied(mx, my, w, h):
@@ -454,7 +458,7 @@ def place_machines_from_genetic_layout(planner, entities, entity_number, machine
             "name": machine_name,
             "position": {"x": mx, "y": my},
         }
-        if machine_name.startswith("assembling-machine") or "furnace" in machine_name:
+        if entity_accepts_recipe_field(machine_name):
             entity["recipe"] = item
         entities.append(entity)
         planner.grid.occupy(mx, my, machine_name, [w, h])

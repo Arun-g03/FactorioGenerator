@@ -12,7 +12,7 @@ class InserterPlacer:
 
 
     def get_direction(self, inserter_x, inserter_y, drop_x, drop_y):
-        """Blueprint direction: inserter faces drop tile (pickup is behind)."""
+        """Blueprint direction: pickup side (tile the inserter pulls from)."""
         from core.constants import direction_for_inserter
 
         return direction_for_inserter((inserter_x, inserter_y), (drop_x, drop_y))

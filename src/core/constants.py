@@ -67,7 +67,7 @@ CARDINAL_NAMES = ("north", "east", "south", "west")
 CARDINAL_DIRECTIONS = tuple(DIRECTIONS[name] for name in CARDINAL_NAMES)
 INSERTER_DIRECTIONS = CARDINAL_DIRECTIONS
 
-# Grid offset from an entity tile to its front (drop / flow) neighbor.
+# Grid offset from an entity tile to its front neighbor (inserter pickup / belt flow).
 DIRECTION_FRONT_OFFSET = {
     FACTORIO_NORTH: (0, -1),
     FACTORIO_EAST: (1, 0),
@@ -134,23 +134,36 @@ def direction_for_inserter(inserter_pos, drop_pos):
     """
     Blueprint direction for an inserter (Factorio 2.0 cardinals).
 
-    The inserter faces drop_pos (front) and picks up from the tile behind it.
+    Unlike belts (flow direction), inserter direction is the pickup side: the
+    tile the inserter pulls from. Drop is on the opposite side.
     """
-    return direction_for_flow(inserter_pos, drop_pos)
+    return direction_for_flow(drop_pos, inserter_pos)
 
 
 def inserter_pickup_tile(inserter_pos, blueprint_direction):
-    """Grid tile behind the inserter (where items are picked up)."""
+    """Grid tile the inserter picks up from (its facing / front tile)."""
     ix, iy = inserter_pos
     dx, dy = DIRECTION_FRONT_OFFSET.get(blueprint_direction, DIRECTION_FRONT_OFFSET[FACTORIO_EAST])
-    return ix - dx, iy - dy
+    return ix + dx, iy + dy
+
+
+_INSERTER_PICKUP_TO_DROP = {
+    FACTORIO_NORTH: FACTORIO_SOUTH,
+    FACTORIO_SOUTH: FACTORIO_NORTH,
+    FACTORIO_EAST: FACTORIO_WEST,
+    FACTORIO_WEST: FACTORIO_EAST,
+}
 
 
 def inserter_direction_for_display(blueprint_direction):
-    """Blueprint direction for UI arrows (Factorio 2.0 value; None → north)."""
+    """
+    Direction for Pygame inserter arrows.
+
+    Blueprint stores pickup side; the UI arrow points toward the drop side.
+    """
     if blueprint_direction is None:
-        return FACTORIO_NORTH
-    return int(blueprint_direction)
+        return FACTORIO_SOUTH
+    return _INSERTER_PICKUP_TO_DROP.get(int(blueprint_direction), int(blueprint_direction))
 
 
 # Horizontal tiles per machine I/O block: 4 west + machine_w + 4 east (belts + inserters).

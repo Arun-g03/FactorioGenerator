@@ -4,6 +4,26 @@ import logging
 import math
 
 
+def machine_entity_for_recipe(item: str, recipe: dict) -> str:
+    """
+    Entity to place when producing ``item``.
+
+    Recipe ``machine`` may be null for buildings (e.g. assembling-machine-1);
+    in that case the product name is the placed entity.
+    """
+    machine = recipe.get("machine")
+    if machine:
+        return machine
+    return item
+
+
+def entity_accepts_recipe_field(entity_name: str) -> bool:
+    """True when a blueprint entity should include a ``recipe`` field."""
+    if not entity_name:
+        return False
+    return entity_name.startswith("assembling-machine") or "furnace" in entity_name
+
+
 class ProductionCalculator:
     """Utility class for production calculations (items per minute per machine)."""
 

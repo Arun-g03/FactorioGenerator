@@ -12,10 +12,21 @@ from core.constants import (
     TRANSPORT_BELT_THROUGHPUT_PER_MIN,
     machine_io_stride,
 )
-from planners.machine_placer.calculations import ProductionCalculator
+from planners.machine_placer.calculations import (
+    ProductionCalculator,
+    entity_accepts_recipe_field,
+    machine_entity_for_recipe,
+)
 from planners.machine_placer.positioning import PositionFinder
 from planners.layout_fitness import evaluate_stage_layout
-from planners.machine_io import place_machine_io_block
+from planners.machine_io import machine_row_step, place_machine_io_block
+from planners.rule_based_placement import (
+    NetworkLayoutCursor,
+    compute_stage_depths,
+    evaluate_rule_machine_layout,
+    network_origin_for_stage,
+)
+from planners.stage_connector import stage_lanes_from_machines
 
 
 @dataclass
@@ -53,13 +64,14 @@ class ProductionPlanner:
         self.rate_summary: list[RateSummaryLine] = []
         self.production_stages: list = []
         self.stage_machines: dict[str, list] = {}
-        self._stage_spacing = 18
-        self._next_stage_x = 10
-        self._stage_y = 15
+        self._network_cursor: NetworkLayoutCursor | None = None
+        self._stage_lanes: dict = {}
+        self._stage_flow_direction: dict[str, int] = {}
         self.layout_fitness = None
         self.genetic_generations = 0
         self.genetic_converged = False
-        self.blueprint_start: tuple[int, int] | None = None
+        self.blueprint_input_starts: dict[str, tuple[int, int]] = {}
+        self.blueprint_start: tuple[int, int] | None = None  # first chest, if any
 
     def build_rate_graph(self, targets: dict[str, float]):
         """Populate self.nodes from user targets and mode."""
@@ -123,17 +135,11 @@ class ProductionPlanner:
                     visit(dep)
             order.append(self.nodes[item])
 
-        for item in self.nodes:
+        for item in sorted(self.nodes.keys()):
             visit(item)
         return order
 
-    def _allocate_stage_position(self, item, machine_w, machine_h, machine_count):
-        """Allocate origin for a stage (row of machines along X)."""
-        stride = machine_io_stride(machine_w)
-        total_width = machine_count * stride + 6
-        x_start = self._next_stage_x
-        y_start = self._stage_y
-        self._next_stage_x += total_width + self._stage_spacing
+    def _record_stage(self, item, x_start, y_start):
         self.production_stages.append({
             "id": len(self.production_stages) + 1,
             "type": item,
@@ -141,7 +147,6 @@ class ProductionPlanner:
             "recipe": self.nodes[item].recipe,
             "entities": [],
         })
-        return x_start, y_start
 
     def place_node(self, entities, entity_number, node: RateNode) -> int:
         """Place machines and I/O for one rate node."""
@@ -149,17 +154,21 @@ class ProductionPlanner:
             return entity_number
 
         self._refresh_machine_counts()
-        machine_name = node.recipe.get("machine", "assembling-machine-1")
+        machine_name = machine_entity_for_recipe(node.item, node.recipe)
         w, h = node.recipe.get("machine_size", [3, 3])
-        x_start, y_start = self._allocate_stage_position(
-            node.item, w, h, node.machine_count
+        cursor = self._network_cursor or NetworkLayoutCursor()
+        x_start, y_start, flow_dir = network_origin_for_stage(
+            node, self.nodes, self._stage_lanes, cursor
         )
+        self._stage_flow_direction[node.item] = flow_dir
+        self._record_stage(node.item, x_start, y_start)
 
         for i in range(node.machine_count):
-            mx = x_start + i * machine_io_stride(w)
-            my = y_start
+            dx, dy = machine_row_step(flow_dir, machine_io_stride(w), i)
+            mx = x_start + dx
+            my = y_start + dy
             if self.grid.is_occupied(mx, my, w, h):
-                alt = self.position_finder.find_next_available_position_with_spacing(w, h)
+                alt = self.position_finder.find_placement_near(mx, my, w, h)
                 if alt[0] is not None:
                     mx, my = alt
                 else:
@@ -171,7 +180,7 @@ class ProductionPlanner:
                 "name": machine_name,
                 "position": {"x": mx, "y": my},
             }
-            if machine_name.startswith("assembling-machine") or "furnace" in machine_name:
+            if entity_accepts_recipe_field(machine_name):
                 entity["recipe"] = node.item
             entities.append(entity)
             self.grid.occupy(mx, my, machine_name, [w, h])
@@ -180,8 +189,21 @@ class ProductionPlanner:
             self.stage_machines.setdefault(node.item, []).append((mx, my, w, h))
 
             entity_number = place_machine_io_block(
-                self.grid, entities, entity_number, mx, my, w, h, flow_east=True
+                self.grid,
+                entities,
+                entity_number,
+                mx,
+                my,
+                w,
+                h,
+                flow_direction=flow_dir,
             )
+
+        lanes = stage_lanes_from_machines(
+            self.stage_machines.get(node.item, []), flow_dir
+        )
+        if lanes:
+            self._stage_lanes[node.item] = lanes
 
         return entity_number
 
@@ -189,13 +211,16 @@ class ProductionPlanner:
         """Route belts between stages and from base-material buses."""
         from planners.stage_connector import connect_base_materials, connect_stages
 
+        self.blueprint_input_starts = {}
         self.blueprint_start = None
         entity_number = connect_stages(
             self.grid, entities, entity_number, self.stage_machines, self.nodes
         )
-        entity_number, self.blueprint_start = connect_base_materials(
+        entity_number, self.blueprint_input_starts = connect_base_materials(
             self.grid, entities, entity_number, self.stage_machines, self.nodes
         )
+        if self.blueprint_input_starts:
+            self.blueprint_start = next(iter(self.blueprint_input_starts.values()))
         return entity_number
 
     def build_rate_summary(self, targets: dict[str, float]):
@@ -221,9 +246,10 @@ class ProductionPlanner:
                 RateSummaryLine(item, requested, achieved, node.machine_count, warning)
             )
 
-    def _reset_placement_state(self, stage_y: int):
-        self._stage_y = stage_y
-        self._next_stage_x = 10
+    def _reset_placement_state(self):
+        self._network_cursor = NetworkLayoutCursor()
+        self._stage_lanes = {}
+        self._stage_flow_direction = {}
         self.production_stages.clear()
         self.stage_machines.clear()
 
@@ -235,50 +261,28 @@ class ProductionPlanner:
     def generate(
         self, targets: dict[str, float], entities: list, entity_number: int
     ) -> tuple[list, int]:
-        """Rule-based placement; picks the best stage row among fitness candidates."""
+        """Rule-based network placement: stages anchor on their recipe dependencies."""
         self.build_rate_graph(targets)
         self._refresh_machine_counts()
+        depths = compute_stage_depths(self.nodes)
 
-        grid_backup = dict(self.grid.occupied)
-        candidate_rows = (12, 15, 18, 22)
-        best_score = float("-inf")
-        best_pack = None
+        self._reset_placement_state()
+        entity_number = self._place_all_nodes(entities, entity_number)
 
-        for stage_y in candidate_rows:
-            self.grid.occupied = dict(grid_backup)
-            self._reset_placement_state(stage_y)
-            trial_entities: list = []
-            trial_num = self._place_all_nodes(trial_entities, entity_number)
-            score = evaluate_stage_layout(
-                self.stage_machines, self.nodes, self.grid
-            ).total
-            if score > best_score:
-                best_score = score
-                best_pack = (
-                    trial_entities,
-                    trial_num,
-                    list(self.production_stages),
-                    {k: list(v) for k, v in self.stage_machines.items()},
-                    stage_y,
-                    dict(self.grid.occupied),
-                )
-
-        if best_pack:
-            trial_entities, trial_num, stages, machines, stage_y, grid_state = best_pack
-            entities.clear()
-            entities.extend(trial_entities)
-            entity_number = trial_num
-            self.production_stages = stages
-            self.stage_machines = machines
-            self._stage_y = stage_y
-            self.grid.occupied = grid_state
-            self.logger.info(
-                "Rule-based layout chose stage_y=%s (score=%.0f/100)",
-                stage_y,
-                best_score,
-            )
-        else:
-            self.grid.occupied = dict(grid_backup)
+        fitness = evaluate_rule_machine_layout(
+            self.stage_machines, self.nodes, grid=self.grid
+        )
+        self.layout_fitness = fitness
+        self.logger.info(
+            "Rule-based network: stages=%s max_depth=%s viable=%s score=%.0f/100",
+            len(self.stage_machines),
+            max(depths.values()) if depths else 0,
+            fitness.is_viable,
+            fitness.total,
+        )
+        if fitness.blockers:
+            for msg in fitness.blockers[:3]:
+                self.logger.warning("  layout: %s", msg)
 
         entity_number = self._connect_production_stages(entities, entity_number)
         self._score_layout()

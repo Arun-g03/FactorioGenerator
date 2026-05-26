@@ -18,21 +18,20 @@ BASE_BUS_LENGTH = 40
 BLUEPRINT_START_CHEST = "wooden-chest"
 
 
-def machine_io_lanes(machine_x, machine_y, width, height):
+def machine_io_lanes(machine_x, machine_y, width, height, flow_direction=FACTORIO_EAST):
     """Return (input_start, output_end) belt lane anchor tiles for one machine."""
-    lane_y = machine_y + height // 2
-    input_start = (machine_x - 4, lane_y)
-    output_end = (machine_x + width + 3, lane_y)
-    return input_start, output_end
+    from planners.machine_io import machine_io_lanes as _io_lanes
+
+    return _io_lanes(machine_x, machine_y, width, height, flow_direction)
 
 
-def stage_lanes_from_machines(machines):
+def stage_lanes_from_machines(machines, flow_direction=FACTORIO_EAST):
     """Aggregate I/O lane anchors for a stage with one or more machines in a row."""
     if not machines:
         return None
     ordered = sorted(machines, key=lambda m: (m[0], m[1]))
-    input_start, _ = machine_io_lanes(*ordered[0])
-    _, output_end = machine_io_lanes(*ordered[-1])
+    input_start, _ = machine_io_lanes(*ordered[0][:4], flow_direction)
+    _, output_end = machine_io_lanes(*ordered[-1][:4], flow_direction)
     return {"input_start": input_start, "output_end": output_end}
 
 
@@ -435,10 +434,10 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
 
 def connect_base_materials(grid, entities, entity_number, stage_machines, nodes):
     """
-    Place a top resource bus and route base materials into stages that need them.
+    Place a top resource bus per base material and route into stage inputs.
 
-    The first tile of the topmost bus is a wooden chest marking the blueprint start;
-    belts run east from the next tile and drop lines snake to each stage input.
+    Each starting item (iron ore, copper ore, etc.) gets its own wooden chest on
+    the first tile of its bus; belts run east from the next tile.
     """
     base_demands = {}
     for item, node in nodes.items():
@@ -452,25 +451,27 @@ def connect_base_materials(grid, entities, entity_number, stage_machines, nodes)
                 base_demands.setdefault(dep, []).append(lanes["input_start"])
 
     if not base_demands:
-        return entity_number, None
+        return entity_number, {}
 
-    blueprint_start = (BASE_BUS_X_START, BASE_BUS_Y)
+    input_starts: dict[str, tuple[int, int]] = {}
     bus_index = 0
 
-    for resource, input_points in base_demands.items():
+    for resource in sorted(base_demands.keys()):
+        input_points = base_demands[resource]
         bus_y = BASE_BUS_Y + bus_index * 2
-        bus_x_start = BASE_BUS_X_START
+        chest_x = BASE_BUS_X_START
+        bus_x_start = BASE_BUS_X_START + 1
 
-        if bus_index == 0:
-            entity_number = _place_storage_chest(
-                grid, entities, entity_number, bus_x_start, bus_y
-            )
-            bus_x_start = BASE_BUS_X_START + 1
-            logger.info(
-                "Blueprint start chest at (%s, %s)",
-                BASE_BUS_X_START,
-                bus_y,
-            )
+        entity_number = _place_storage_chest(
+            grid, entities, entity_number, chest_x, bus_y
+        )
+        input_starts[resource] = (chest_x, bus_y)
+        logger.info(
+            "Input start chest for %s at (%s, %s)",
+            resource,
+            chest_x,
+            bus_y,
+        )
 
         for belt_x in range(bus_x_start, BASE_BUS_X_START + BASE_BUS_LENGTH):
             entity_number = _place_belt(
@@ -486,4 +487,4 @@ def connect_base_materials(grid, entities, entity_number, stage_machines, nodes)
 
         bus_index += 1
 
-    return entity_number, blueprint_start
+    return entity_number, input_starts

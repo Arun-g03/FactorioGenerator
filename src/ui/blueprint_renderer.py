@@ -116,6 +116,27 @@ class BlueprintRenderer:
         screen_x = world_x * self.tile_size * self.zoom + self.camera_x
         screen_y = world_y * self.tile_size * self.zoom + self.camera_y
         return int(screen_x), int(screen_y)
+
+    def screen_to_world(self, screen_x, screen_y):
+        """Convert screen coordinates to world coordinates."""
+        scale = self.tile_size * self.zoom
+        if scale <= 0:
+            return 0.0, 0.0
+        return (
+            (screen_x - self.camera_x) / scale,
+            (screen_y - self.camera_y) / scale,
+        )
+
+    def _zoom_at_screen(self, screen_x, screen_y, factor):
+        """Zoom while keeping the world point under the cursor fixed on screen."""
+        world_x, world_y = self.screen_to_world(screen_x, screen_y)
+        new_zoom = max(0.1, min(3.0, self.zoom * factor))
+        if abs(new_zoom - self.zoom) < 1e-9:
+            return
+        scale = self.tile_size * new_zoom
+        self.camera_x = screen_x - world_x * scale
+        self.camera_y = screen_y - world_y * scale
+        self.zoom = new_zoom
     
     def render_entity(self, entity, show_grid=True):
         """Render a single entity."""
@@ -359,14 +380,16 @@ class BlueprintRenderer:
                     
                     self.dragging = True
                     self.last_mouse_pos = mouse_pos
-                elif event.button == 4:  # Scroll up
+                elif event.button in (4, 5):  # Scroll wheel
                     if self._workspace_interactive():
-                        self.zoom *= 1.1
-                        self.zoom = min(self.zoom, 3.0)
-                elif event.button == 5:  # Scroll down
-                    if self._workspace_interactive():
-                        self.zoom /= 1.1
-                        self.zoom = max(self.zoom, 0.1)
+                        mx, my = event.pos
+                        factor = 1.1 if event.button == 4 else 1.0 / 1.1
+                        self._zoom_at_screen(mx, my, factor)
+            elif event.type == pygame.MOUSEWHEEL:
+                if self._workspace_interactive():
+                    mx, my = pygame.mouse.get_pos()
+                    factor = 1.1 if event.y > 0 else 1.0 / 1.1
+                    self._zoom_at_screen(mx, my, factor)
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == 1:
                     self.dragging = False
