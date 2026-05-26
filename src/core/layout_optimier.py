@@ -1,3 +1,5 @@
+"""Defines the layout optimizer for the Factorio Blueprint Generator."""
+
 import logging
 
 class LayoutOptimizer:

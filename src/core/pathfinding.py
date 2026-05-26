@@ -1,3 +1,11 @@
+"""
+
+Defines the pathfinder for the Factorio Blueprint Generator.
+Used for constructing paths for belts and inserters.
+
+
+"""
+
 import heapq
 import logging
 

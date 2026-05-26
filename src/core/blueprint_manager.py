@@ -1,3 +1,5 @@
+"""Blueprint manager for Factorio blueprints."""
+
 import logging
 
 from core.constants import (

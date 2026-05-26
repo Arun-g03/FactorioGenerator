@@ -1,3 +1,5 @@
+"Defines the grid environment for the Factorio Blueprint Generator."
+
 import logging
 
 class Grid:

@@ -1,3 +1,6 @@
+"""Main entry point for the Factorio Blueprint Generator."""
+
+
 import json
 import logging
 import sys

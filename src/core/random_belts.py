@@ -1,3 +1,5 @@
+"""Defines the random belt placer for the Factorio Blueprint Generator."""
+
 import random
 import logging
 import json

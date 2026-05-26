@@ -1,3 +1,5 @@
+"""Constants for the Factorio Blueprint Generator."""
+
 from enum import Enum
 
 # Production targets and planner logic use items per minute ("min") or per second ("sec").

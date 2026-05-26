@@ -1,3 +1,7 @@
+"""Entity for Factorio blueprints.
+    This class represents an entity in the Factorio blueprint.
+
+"""
 class Entity:
     def __init__(self, entity_number, name, position, direction=None, recipe=None, crafting_speed=None):
         self.entity_number = entity_number

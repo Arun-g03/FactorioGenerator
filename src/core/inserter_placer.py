@@ -1,3 +1,5 @@
+"""Defines the inserter placer for the Factorio Blueprint Generator."""
+
 import logging
 from core.entity import Entity
 

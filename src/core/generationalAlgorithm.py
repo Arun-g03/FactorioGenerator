@@ -1,3 +1,5 @@
+"""Generational algorithm for optimizing factory layouts."""
+
 import random
 import logging
 
