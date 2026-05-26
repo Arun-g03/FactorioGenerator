@@ -37,6 +37,11 @@ class Toolbar:
 
         self.placement_strategy = None
 
+    def resize(self, width: int, height: int) -> None:
+        """Re-anchor the toolbar when the window is resized."""
+        self.width = width
+        self.y_position = height - self.toolbar_height
+
     def draw(self, screen):
         toolbar_rect = pygame.Rect(0, self.y_position, self.width, self.toolbar_height)
         pygame.draw.rect(screen, self.bg_color, toolbar_rect)

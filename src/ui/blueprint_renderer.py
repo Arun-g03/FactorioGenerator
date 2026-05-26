@@ -85,6 +85,15 @@ class BlueprintRenderer:
             PYGAME_WINDOW_HEIGHT,
         )
 
+    def _on_window_resize(self, width: int, height: int) -> None:
+        """Update layout for a new window size."""
+        self.width = width
+        self.height = height
+        if self.toolbar:
+            self.toolbar.resize(width, height)
+        if self.recipe_panel:
+            self.recipe_panel.set_window_size(width, height)
+
     def _viewport_center(self):
         """Pixel center of the drawable canvas (area above the toolbar)."""
         canvas_bottom = self.toolbar.y_position if self.toolbar else self.height
@@ -339,6 +348,9 @@ class BlueprintRenderer:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "exit"
+            if self.screen_manager.handle_resize_event(event):
+                w, h = self.screen_manager.get_size()
+                self._on_window_resize(w, h)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
                     mouse_pos = pygame.mouse.get_pos()
@@ -677,11 +689,17 @@ class BlueprintRenderer:
         self._recipes_data = recipes_data
         self.screen = self.screen_manager.get_screen()
         self.screen_manager.set_caption("Factorio Blueprint Workspace")
+        w, h = self.screen_manager.get_size()
+        self._on_window_resize(w, h)
 
         if self.toolbar is None:
             self.toolbar = Toolbar(self.width, self.height, self.height)
+        else:
+            self.toolbar.resize(self.width, self.height)
         if self.recipe_panel is None:
             self.recipe_panel = RecipePanel()
+        else:
+            self.recipe_panel.set_window_size(self.width, self.height)
         if initial_targets:
             self.recipe_panel.load_targets(initial_targets)
 

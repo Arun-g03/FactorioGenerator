@@ -32,7 +32,7 @@ class BlueprintManager:
         self.planner = None
         self.rate_summary = []
 
-    def generate_blueprint(self, progress_callback=None):
+    def generate_blueprint(self, progress_callback=None, placement_recorder=None):
         from core import constants as constants_module
 
         targets = constants_module.PRODUCTION_TARGETS
@@ -52,7 +52,19 @@ class BlueprintManager:
             self.belt_router,
             self.recipes_data,
             self.generation_mode,
+            placement_recorder=placement_recorder,
         )
+        if placement_recorder is not None:
+            placement_recorder.record(
+                "init",
+                "Initialize grid and planner",
+                [
+                    f"Targets: {targets}",
+                    f"Generation mode: {self.generation_mode.value}",
+                    f"Placement: {self.placement_strategy.value}",
+                ],
+                entities,
+            )
         if self.placement_strategy == PlacementStrategy.GENETIC:
             entities, entity_number = self.planner.generate_genetic(
                 targets, entities, entity_number, progress_callback=progress_callback

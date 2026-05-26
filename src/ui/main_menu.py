@@ -53,9 +53,10 @@ class MainMenu:
     def setup_menu(self):
         """Set up menu buttons."""
         self.buttons = [
-            {"text": "Start", "action": "generate", "y": 200},
-            {"text": "Settings", "action": "settings", "y": 280},
-            {"text": "Exit", "action": "exit", "y": 360},
+            {"text": "Start", "action": "generate", "y": 180},
+            {"text": "Placement Replay", "action": "replay", "y": 250},
+            {"text": "Settings", "action": "settings", "y": 320},
+            {"text": "Exit", "action": "exit", "y": 390},
         ]
     
     def get_button_rect(self, button_info):
@@ -133,7 +134,10 @@ class MainMenu:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "exit"
-            
+            if self.screen_manager.handle_resize_event(event):
+                self.width, self.height = self.screen_manager.get_size()
+                self.screen = self.screen_manager.get_screen()
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP:
                     self.selected_button = (self.selected_button - 1) % len(self.buttons)
@@ -163,7 +167,8 @@ class MainMenu:
     def run(self):
         """Run the main menu."""
         self.setup_menu()
-        
+        self.width, self.height = self.screen_manager.get_size()
+
         if not self.factorio_path_ok:
             self.logger.warning("Factorio graphics path not found. Visualization may not work.")
         

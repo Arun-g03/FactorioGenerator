@@ -52,12 +52,21 @@ class RateSummaryLine:
 class ProductionPlanner:
     """Builds rate graph and places entities for a blueprint."""
 
-    def __init__(self, grid, pathfinder, belt_router, recipes_data, mode: GenerationMode):
+    def __init__(
+        self,
+        grid,
+        pathfinder,
+        belt_router,
+        recipes_data,
+        mode: GenerationMode,
+        placement_recorder=None,
+    ):
         self.grid = grid
         self.pathfinder = pathfinder
         self.belt_router = belt_router
         self.recipes_data = recipes_data
         self.mode = mode
+        self.placement_recorder = placement_recorder
         self.calculator = ProductionCalculator(recipes_data)
         self.position_finder = PositionFinder(grid)
         self.logger = logging.getLogger(__name__)
@@ -149,6 +158,25 @@ class ProductionPlanner:
             "entities": [],
         })
 
+    def _flow_label(self, direction: int) -> str:
+        from core.constants import direction_sprite_suffix
+
+        return direction_sprite_suffix(direction)
+
+    def _replay(
+        self,
+        kind: str,
+        title: str,
+        detail: list[str],
+        entities: list,
+        *,
+        highlights: list[tuple[int, int]] | None = None,
+    ) -> None:
+        if self.placement_recorder is not None:
+            self.placement_recorder.record(
+                kind, title, detail, entities, highlights=highlights
+            )
+
     def place_node(self, entities, entity_number, node: RateNode) -> int:
         """Place machines and I/O for one rate node."""
         if not node.recipe:
@@ -163,6 +191,36 @@ class ProductionPlanner:
         )
         self._stage_flow_direction[node.item] = flow_dir
         self._record_stage(node.item, x_start, y_start)
+
+        upstream = [
+            d for d in node.dependencies
+            if d in self.nodes and d not in BASE_MATERIALS
+        ]
+        plan_detail = [
+            f"Item: {node.item}",
+            f"Machines: {node.machine_count} @ ({x_start}, {y_start})",
+            f"Belt flow: {self._flow_label(flow_dir)}",
+            f"Rate target: {node.required_rate:.1f}/min",
+            f"Ingredients: {', '.join(node.dependencies) or 'none'}",
+        ]
+        if upstream:
+            plan_detail.append(f"Upstream stages: {', '.join(upstream)}")
+            for dep in upstream:
+                lanes = self._stage_lanes.get(dep)
+                if lanes:
+                    plan_detail.append(
+                        f"  {dep} output lane -> {lanes['output_end']}"
+                    )
+        else:
+            plan_detail.append("Root stage (no upstream producers).")
+
+        self._replay(
+            "stage_plan",
+            f"Plan stage: {node.item}",
+            plan_detail,
+            entities,
+            highlights=[(x_start, y_start)],
+        )
 
         for i in range(node.machine_count):
             dx, dy = machine_row_step(flow_dir, machine_io_stride(w), i)
@@ -199,12 +257,33 @@ class ProductionPlanner:
                 h,
                 flow_direction=flow_dir,
             )
+            self._replay(
+                "machine",
+                f"Place {node.item} machine {i + 1}/{node.machine_count}",
+                [
+                    f"Machine tile: ({mx}, {my}) size {w}x{h}",
+                    "Added belts + inserters on I/O lanes.",
+                ],
+                entities,
+                highlights=[(mx, my)],
+            )
 
         lanes = stage_lanes_from_machines(
             self.stage_machines.get(node.item, []), flow_dir
         )
         if lanes:
             self._stage_lanes[node.item] = lanes
+            self._replay(
+                "lanes",
+                f"Stage lanes: {node.item}",
+                plan_detail
+                + [
+                    f"Input anchor: {lanes['input_start']}",
+                    f"Output anchor: {lanes['output_end']}",
+                ],
+                entities,
+                highlights=[lanes["input_start"], lanes["output_end"]],
+            )
 
         return entity_number
 
@@ -215,10 +294,20 @@ class ProductionPlanner:
         self.blueprint_input_starts = {}
         self.blueprint_start = None
         entity_number = connect_stages(
-            self.grid, entities, entity_number, self.stage_machines, self.nodes
+            self.grid,
+            entities,
+            entity_number,
+            self.stage_machines,
+            self.nodes,
+            placement_recorder=self.placement_recorder,
         )
         entity_number, self.blueprint_input_starts = connect_base_materials(
-            self.grid, entities, entity_number, self.stage_machines, self.nodes
+            self.grid,
+            entities,
+            entity_number,
+            self.stage_machines,
+            self.nodes,
+            placement_recorder=self.placement_recorder,
         )
         if self.blueprint_input_starts:
             self.blueprint_start = next(iter(self.blueprint_input_starts.values()))
@@ -267,6 +356,19 @@ class ProductionPlanner:
         self._refresh_machine_counts()
         depths = compute_stage_depths(self.nodes)
 
+        if self.placement_recorder is not None:
+            graph_lines = [
+                f"{item}: {n.machine_count} machine(s), "
+                f"{n.required_rate:.1f}/min, deps={n.dependencies}"
+                for item, n in self.nodes.items()
+            ]
+            self._replay(
+                "rate_graph",
+                "Build production rate graph",
+                graph_lines + [f"Topological depth (max): {max(depths.values()) if depths else 0}"],
+                entities,
+            )
+
         self._reset_placement_state()
         entity_number = self._place_all_nodes(entities, entity_number)
 
@@ -285,9 +387,35 @@ class ProductionPlanner:
             for msg in fitness.blockers[:3]:
                 self.logger.warning("  layout: %s", msg)
 
+        pre_connect_detail = [
+            f"Score: {fitness.total:.0f}/100 (viable={fitness.is_viable})",
+        ]
+        if fitness.blockers:
+            pre_connect_detail.extend(fitness.blockers[:6])
+        self._replay(
+            "layout",
+            "Machine layout scored (before belts)",
+            pre_connect_detail,
+            entities,
+        )
+
         entity_number = self._connect_production_stages(entities, entity_number)
         self._score_layout(entities)
         self.build_rate_summary(targets)
+
+        if self.layout_fitness:
+            final_detail = [
+                f"Final viability: {self.layout_fitness.is_viable}",
+                f"Score: {self.layout_fitness.total:.0f}/100",
+            ]
+            if self.layout_fitness.blockers:
+                final_detail.extend(self.layout_fitness.blockers[:8])
+            self._replay(
+                "complete",
+                "Blueprint placement complete",
+                final_detail,
+                entities,
+            )
         return entities, entity_number
 
     def _score_layout(self, entities=None):

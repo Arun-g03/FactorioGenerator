@@ -16,27 +16,11 @@ for _path in (_ui, _src):
 
 from src.ui.blueprint_renderer import BlueprintRenderer
 
-# Load config and update constants if necessary
 def load_config():
-    """Load configuration from config.json."""
-    config_file = Path(__file__).parent / "config.json"
-    if config_file.exists():
-        try:
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-            # Update the constants module
-            from src.core import constants as constants_module
-            
-            # Handle both old and new config format
-            if "factorio_install_path" in config:
-                # New format: base path
-                constants_module.FACTORIO_INSTALL_PATH = config["factorio_install_path"]
-                constants_module.FACTORIO_BASE_GRAPHICS_PATH = constants_module.get_factorio_graphics_path(config["factorio_install_path"])
-            elif "factorio_graphics_path" in config:
-                # Old format: full graphics path (backward compatibility)
-                constants_module.FACTORIO_BASE_GRAPHICS_PATH = config["factorio_graphics_path"]
-        except Exception as e:
-            logging.warning(f"Failed to load config: {e}")
+    """Load configuration from config.json (paths + window size)."""
+    from src.core.app_config import apply_factorio_paths, load_config as read_config
+
+    apply_factorio_paths(read_config())
 
 # Load JSON data
 with open('src/data/recipes.json', 'r') as recipes_file:
@@ -77,6 +61,20 @@ def main():
                     recipes_data,
                     initial_targets=PRODUCTION_TARGETS,
                     open_targets_modal=True,
+                )
+                if result == "exit":
+                    break
+            elif choice == "replay":
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s",
+                )
+                from src.core.constants import PRODUCTION_TARGETS
+                from src.ui.placement_replay import run_placement_replay_session
+
+                result = run_placement_replay_session(
+                    recipes_data,
+                    initial_targets=PRODUCTION_TARGETS,
                 )
                 if result == "exit":
                     break

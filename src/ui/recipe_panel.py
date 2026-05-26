@@ -63,6 +63,13 @@ class RecipePanel:
         self.available_items = self._load_available_items()
         self.generation_mode = GenerationMode.ASSEMBLER_ONLY
 
+    def set_window_size(self, width: int, height: int) -> None:
+        """Re-center the modal when the window is resized."""
+        self.width = width
+        self.height = height
+        self.panel_x = (self.width - self.panel_width) // 2
+        self.panel_y = (self.height - self.panel_height) // 2
+
     # --- layout helpers ---
 
     def _add_row_y(self):

@@ -23,10 +23,9 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from core.app_config import CONFIG_PATH, load_config, save_config
 from core.constants import PYGAME_WINDOW_WIDTH, PYGAME_WINDOW_HEIGHT, get_factorio_graphics_path
 from screen_manager import ScreenManager
-
-CONFIG_FILE = Path(__file__).parent.parent.parent.parent / "config.json"
 
 class SettingsMenu:
     """Settings menu for the blueprint generator."""
@@ -77,24 +76,18 @@ class SettingsMenu:
         
     def load_settings(self):
         """Load settings from config file."""
-        if CONFIG_FILE.exists():
-            try:
-                with open(CONFIG_FILE, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                self.logger.error(f"Failed to load config: {e}")
-        return {}
-    
+        return load_config()
+
     def save_settings(self):
         """Save settings to config file."""
         try:
             self.settings["factorio_install_path"] = self.factorio_path
-            # Also save the computed graphics path for backward compatibility
             graphics_path = get_factorio_graphics_path(self.factorio_path)
             self.settings["factorio_graphics_path"] = graphics_path
-            
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(self.settings, f, indent=4)
+            self.screen_manager.persist_window_size()
+            self.settings["window_width"] = self.screen_manager.width
+            self.settings["window_height"] = self.screen_manager.height
+            save_config(self.settings)
             
             self.message = "Settings saved successfully!"
             self.message_color = self.success_color
@@ -496,7 +489,10 @@ class SettingsMenu:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "exit"
-            
+            if self.screen_manager.handle_resize_event(event):
+                self.width, self.height = self.screen_manager.get_size()
+                self.screen = self.screen_manager.get_screen()
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return "back"
@@ -562,9 +558,10 @@ class SettingsMenu:
     
     def run(self):
         """Run the settings menu."""
+        self.width, self.height = self.screen_manager.get_size()
         running = True
         result = None
-        
+
         while running and result is None:
             # Handle events
             result = self.handle_events()

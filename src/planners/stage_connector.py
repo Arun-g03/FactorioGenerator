@@ -321,6 +321,9 @@ def connect_lane_to_lane(
     producer_output,
     consumer_input,
     lane_offset=0,
+    *,
+    placement_recorder=None,
+    connection_detail: list[str] | None = None,
 ):
     """
     Route belts from a producer's output lane to a consumer's input lane.
@@ -355,10 +358,30 @@ def connect_lane_to_lane(
         consumer_input,
         lane_offset,
     )
+    if placement_recorder is not None:
+        detail = list(connection_detail or [])
+        detail.append(f"Path tiles placed: {len(path)}")
+        if lane_offset != 0:
+            detail.append(f"Merge lane offset: {lane_offset}")
+        placement_recorder.record(
+            "connect",
+            detail[0] if detail else "Connect stages",
+            detail[1:],
+            entities,
+            highlights=[producer_output, consumer_input],
+        )
     return entity_number
 
 
-def connect_stages(grid, entities, entity_number, stage_machines, nodes):
+def connect_stages(
+    grid,
+    entities,
+    entity_number,
+    stage_machines,
+    nodes,
+    *,
+    placement_recorder=None,
+):
     """
     Connect each stage's output belts to downstream stages that consume its product.
 
@@ -403,12 +426,28 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
             )
             ingredient_index += 1
 
+    if placement_recorder is not None:
+        placement_recorder.record(
+            "connect_start",
+            "Connect production stages",
+            [
+                f"Stages with lanes: {', '.join(sorted(stage_lanes.keys()))}",
+                f"Producer groups to route: {len(requests_by_producer)}",
+            ],
+            entities,
+        )
+
     for producer_output_end, requests in requests_by_producer.items():
         requests = _dedupe_connection_requests(requests)
         out_x, out_y = producer_output_end
 
         if not _needs_splitter_fanout(requests):
             for req in requests:
+                title = f"Belt: {req['dep']} -> {req['consumer_item']}"
+                conn_detail = [
+                    title,
+                    f"From output {producer_output_end} to input {req['consumer_input_start']}",
+                ]
                 entity_number = connect_lane_to_lane(
                     grid,
                     entities,
@@ -416,6 +455,8 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
                     producer_output_end,
                     req["consumer_input_start"],
                     lane_offset=req["lane_offset"],
+                    placement_recorder=placement_recorder,
+                    connection_detail=conn_detail,
                 )
             continue
 
@@ -445,8 +486,26 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
                     producer_output_end,
                     req["consumer_input_start"],
                     lane_offset=req["lane_offset"],
+                    placement_recorder=placement_recorder,
+                    connection_detail=[
+                        f"Belt fallback: {req['dep']} -> {req['consumer_item']}",
+                        f"Splitter blocked at {producer_output_end}",
+                    ],
                 )
             continue
+
+        if placement_recorder is not None:
+            consumers = ", ".join(req["consumer_item"] for req in requests)
+            placement_recorder.record(
+                "splitter",
+                f"Splitter fan-out at {producer_output_end}",
+                [
+                    f"Feeds: {consumers}",
+                    f"Placed at ({splitter_x}, {splitter_y})",
+                ],
+                entities,
+                highlights=[producer_output_end, (splitter_x, splitter_y)],
+            )
 
         logger.info(
             "Placed splitter at (%s, %s) for %s consumer lane(s) from %s",
@@ -475,7 +534,15 @@ def connect_stages(grid, entities, entity_number, stage_machines, nodes):
     return entity_number
 
 
-def connect_base_materials(grid, entities, entity_number, stage_machines, nodes):
+def connect_base_materials(
+    grid,
+    entities,
+    entity_number,
+    stage_machines,
+    nodes,
+    *,
+    placement_recorder=None,
+):
     """
     Place a top resource bus per base material and route into stage inputs.
 
@@ -527,6 +594,19 @@ def connect_base_materials(grid, entities, entity_number, stage_machines, nodes)
             path = _manhattan_path((drop_x, bus_y), (in_x - 1, in_y))
             entity_number = place_belt_path(grid, entities, entity_number, path)
             logger.info("Routed base material %s bus to %s", resource, input_start)
+
+        if placement_recorder is not None:
+            placement_recorder.record(
+                "base_bus",
+                f"Base material bus: {resource}",
+                [
+                    f"Chest at ({chest_x}, {bus_y})",
+                    f"Feeds {len(input_points)} stage input(s)",
+                    f"Bus runs east from x={bus_x_start}",
+                ],
+                entities,
+                highlights=[(chest_x, bus_y)] + list(input_points),
+            )
 
         bus_index += 1
 
