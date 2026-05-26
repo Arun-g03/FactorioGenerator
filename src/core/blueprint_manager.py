@@ -22,6 +22,7 @@ class BlueprintManager:
         recipes_data,
         generation_mode: GenerationMode = GenerationMode.ASSEMBLER_ONLY,
         placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED,
+        placement_settings=None,
     ):
         self.grid = grid
         self.pathfinder = pathfinder
@@ -29,6 +30,7 @@ class BlueprintManager:
         self.recipes_data = recipes_data
         self.generation_mode = generation_mode
         self.placement_strategy = placement_strategy
+        self.placement_settings = placement_settings
         self.planner = None
         self.rate_summary = []
 
@@ -53,6 +55,7 @@ class BlueprintManager:
             self.recipes_data,
             self.generation_mode,
             placement_recorder=placement_recorder,
+            placement_settings=self.placement_settings,
         )
         if placement_recorder is not None:
             placement_recorder.record(

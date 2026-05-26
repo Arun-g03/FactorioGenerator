@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 
 from core.constants import (
     BASE_MATERIALS,
+    BELT_LANES_PER_TILE,
     GenerationMode,
     TRANSPORT_BELT_THROUGHPUT_PER_MIN,
-    machine_io_stride,
     machine_io_stride,
 )
 from planners.machine_placer.calculations import (
@@ -20,7 +20,11 @@ from planners.machine_placer.calculations import (
 )
 from planners.machine_placer.positioning import PositionFinder
 from planners.layout_fitness import evaluate_stage_layout
-from planners.machine_io import machine_row_step, place_machine_io_block
+from planners.machine_io import (
+    machine_row_step,
+    place_machine_io_block,
+    recipe_input_lane_count,
+)
 from planners.rule_based_placement import (
     NetworkLayoutCursor,
     compute_stage_depths,
@@ -28,6 +32,10 @@ from planners.rule_based_placement import (
     network_origin_for_stage,
 )
 from planners.stage_connector import stage_lanes_from_machines
+from core.placement_settings import (
+    PlacementSettingsBundle,
+    apply_genetic_settings,
+)
 
 
 @dataclass
@@ -60,6 +68,7 @@ class ProductionPlanner:
         recipes_data,
         mode: GenerationMode,
         placement_recorder=None,
+        placement_settings: PlacementSettingsBundle | None = None,
     ):
         self.grid = grid
         self.pathfinder = pathfinder
@@ -67,6 +76,7 @@ class ProductionPlanner:
         self.recipes_data = recipes_data
         self.mode = mode
         self.placement_recorder = placement_recorder
+        self.placement_settings = placement_settings or PlacementSettingsBundle.defaults()
         self.calculator = ProductionCalculator(recipes_data)
         self.position_finder = PositionFinder(grid)
         self.logger = logging.getLogger(__name__)
@@ -186,8 +196,13 @@ class ProductionPlanner:
         machine_name = machine_entity_for_recipe(node.item, node.recipe)
         w, h = node.recipe.get("machine_size", [3, 3])
         cursor = self._network_cursor or NetworkLayoutCursor()
+        rb = self.placement_settings.rule_based
         x_start, y_start, flow_dir = network_origin_for_stage(
-            node, self.nodes, self._stage_lanes, cursor
+            node,
+            self.nodes,
+            self._stage_lanes,
+            cursor,
+            connection_gap=rb.connection_gap,
         )
         self._stage_flow_direction[node.item] = flow_dir
         self._record_stage(node.item, x_start, y_start)
@@ -202,6 +217,8 @@ class ProductionPlanner:
             f"Belt flow: {self._flow_label(flow_dir)}",
             f"Rate target: {node.required_rate:.1f}/min",
             f"Ingredients: {', '.join(node.dependencies) or 'none'}",
+            f"Input lanes: {recipe_input_lane_count(node.recipe)} "
+            f"(1 belt row per ingredient; {BELT_LANES_PER_TILE} lanes/tile in Factorio)",
         ]
         if upstream:
             plan_detail.append(f"Upstream stages: {', '.join(upstream)}")
@@ -256,6 +273,8 @@ class ProductionPlanner:
                 w,
                 h,
                 flow_direction=flow_dir,
+                recipe=node.recipe,
+                input_lane_count=recipe_input_lane_count(node.recipe),
             )
             self._replay(
                 "machine",
@@ -269,7 +288,9 @@ class ProductionPlanner:
             )
 
         lanes = stage_lanes_from_machines(
-            self.stage_machines.get(node.item, []), flow_dir
+            self.stage_machines.get(node.item, []),
+            flow_dir,
+            recipe=node.recipe,
         )
         if lanes:
             self._stage_lanes[node.item] = lanes
@@ -337,7 +358,12 @@ class ProductionPlanner:
             )
 
     def _reset_placement_state(self):
-        self._network_cursor = NetworkLayoutCursor()
+        rb = self.placement_settings.rule_based
+        self._network_cursor = NetworkLayoutCursor(
+            next_x=rb.network_seed_x,
+            next_y=rb.network_seed_y,
+            row_stride_y=rb.row_stride_y,
+        )
         self._stage_lanes = {}
         self._stage_flow_direction = {}
         self.production_stages.clear()
@@ -464,12 +490,15 @@ class ProductionPlanner:
             self.logger.info(
                 "Genetic placement for %s machines...", len(machine_slots)
             )
-            result = run_genetic_layout(
-                self.grid,
-                machine_slots,
-                self.nodes,
-                progress_callback=progress_callback,
-            )
+            genetic = self.placement_settings.genetic
+            with apply_genetic_settings(genetic):
+                result = run_genetic_layout(
+                    self.grid,
+                    machine_slots,
+                    self.nodes,
+                    population_size=genetic.population_size,
+                    progress_callback=progress_callback,
+                )
             self.genetic_generations = result.generations
             self.genetic_converged = result.converged
             self.layout_fitness = result.fitness_breakdown

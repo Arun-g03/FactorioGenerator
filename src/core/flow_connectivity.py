@@ -390,19 +390,27 @@ def validate_blueprint_flow(
 
         stage_lanes = {}
         for item, machines in stage_machines.items():
-            lanes = stage_lanes_from_machines(machines)
+            node = nodes.get(item)
+            recipe = getattr(node, "recipe", None) if node else None
+            lanes = stage_lanes_from_machines(machines, recipe=recipe)
             if lanes:
                 stage_lanes[item] = lanes
 
     from core.constants import BASE_MATERIALS
+    from planners.machine_io import ingredient_lane_index
 
     for item, node in nodes.items():
         if item not in stage_lanes:
             continue
-        consumer_in = stage_lanes[item]["input_start"]
-        consumer_targets = _flow_endpoint_tiles(consumer_in, tile_map)
+        consumer = stage_lanes[item]
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        input_starts = consumer.get("input_starts", [consumer["input_start"]])
 
         for dep in node.dependencies:
+            lane_idx = ingredient_lane_index(consumer_recipe, dep)
+            consumer_in = input_starts[min(lane_idx, len(input_starts) - 1)]
+            consumer_targets = _flow_endpoint_tiles(consumer_in, tile_map)
+
             if dep in BASE_MATERIALS:
                 chest_sources = {
                     pos
@@ -417,7 +425,9 @@ def validate_blueprint_flow(
             if dep not in stage_lanes:
                 continue
 
-            producer_out = stage_lanes[dep]["output_end"]
+            producer_out = stage_lanes[dep].get(
+                "output_start", stage_lanes[dep]["output_end"]
+            )
             producer_sources = _flow_endpoint_tiles(producer_out, tile_map)
             if not flow_reachable(producer_sources, consumer_targets, adj):
                 result.add(f"no belt flow from {dep} stage to {item} stage")

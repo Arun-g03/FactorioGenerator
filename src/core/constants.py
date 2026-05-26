@@ -222,6 +222,14 @@ def inserter_direction_for_display(blueprint_direction):
     return _INSERTER_PICKUP_TO_DROP.get(int(blueprint_direction), int(blueprint_direction))
 
 
+# Each transport-belt tile has two parallel item lanes (left/right of flow direction).
+# Throughput modeling can treat 1 belt tile as 2 logical item lanes; routing still
+# places one belt row per recipe ingredient for clarity.
+BELT_LANES_PER_TILE = 2
+
+# Spacing between parallel input lanes on one machine (tiles perpendicular to flow).
+INGREDIENT_LANE_SPACING = 2
+
 # Horizontal tiles per machine I/O block: 4 west + machine_w + 4 east (belts + inserters).
 MACHINE_IO_WEST_TILES = 4
 MACHINE_IO_EAST_TILES = 4

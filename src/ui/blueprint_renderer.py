@@ -6,6 +6,7 @@ from sprite_mapper import SpriteMapper
 from screen_manager import ScreenManager
 from toolbar import Toolbar
 from recipe_panel import RecipePanel
+from placement_options_modal import PlacementOptionsModal
 from core.constants import (
     PYGAME_WINDOW_WIDTH,
     PYGAME_WINDOW_HEIGHT,
@@ -61,7 +62,11 @@ class BlueprintRenderer:
         self.genetic_generations = 0
         self.genetic_converged = False
         self._genetic_progress = None
-    
+
+        self.placement_options_modal = None
+        self.show_placement_options = False
+        self.placement_settings = None
+
     def calculate_bounds(self, entities):
         """Calculate the bounding box for all entities."""
         if not entities:
@@ -93,6 +98,8 @@ class BlueprintRenderer:
             self.toolbar.resize(width, height)
         if self.recipe_panel:
             self.recipe_panel.set_window_size(width, height)
+        if self.placement_options_modal:
+            self.placement_options_modal.set_window_size(width, height)
 
     def _viewport_center(self):
         """Pixel center of the drawable canvas (area above the toolbar)."""
@@ -374,6 +381,12 @@ class BlueprintRenderer:
                                     return "menu"
                         continue  # Don't process camera controls
                     
+                    if self.show_placement_options and self.placement_options_modal:
+                        opt_action = self.placement_options_modal.handle_click(mouse_pos)
+                        if opt_action:
+                            self._handle_placement_options_action(opt_action)
+                        continue
+
                     # Targets modal captures clicks
                     if self.show_recipe_panel and self.recipe_panel:
                         panel_action = self.recipe_panel.handle_click(mouse_pos)
@@ -413,6 +426,9 @@ class BlueprintRenderer:
                     self.last_mouse_pos = (dx, dy)
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
+                    if self.show_placement_options:
+                        self.show_placement_options = False
+                        continue
                     if self.show_recipe_panel:
                         self.show_recipe_panel = False
                         continue
@@ -420,6 +436,10 @@ class BlueprintRenderer:
                         self.paused = False
                     else:
                         self.paused = True
+                elif event.key == pygame.K_o and not self.paused:
+                    return "options"
+                elif event.key == pygame.K_o and not self.paused:
+                    return "options"
                 elif event.key == pygame.K_t and not self.paused:
                     return "targets"
                 elif event.key == pygame.K_g and not self.paused:
@@ -443,11 +463,16 @@ class BlueprintRenderer:
                         elif self.pause_selected_button == 1:
                             return "menu"
             
+            if self.show_placement_options and self.placement_options_modal and event.type == pygame.KEYDOWN:
+                opt_result = self.placement_options_modal.handle_key(event)
+                if opt_result:
+                    self._handle_placement_options_action(opt_result)
+
             if self.show_recipe_panel and self.recipe_panel and event.type == pygame.KEYDOWN:
                 panel_result = self.recipe_panel.handle_key(event)
                 if panel_result:
                     self._handle_recipe_panel_action(panel_result)
-        
+
         return True
     
     def _handle_recipe_panel_action(self, action):
@@ -522,7 +547,11 @@ class BlueprintRenderer:
     
     def _workspace_interactive(self):
         """True when the user can pan/zoom the blueprint canvas."""
-        return not self.paused and not self.show_recipe_panel
+        return (
+            not self.paused
+            and not self.show_recipe_panel
+            and not self.show_placement_options
+        )
 
     def load_blueprint(self, gen_result):
         """Load generated blueprint data into the workspace."""
@@ -567,6 +596,8 @@ class BlueprintRenderer:
         else:
             self.placement_strategy = PlacementStrategy.RULE_BASED
             self.logger.info("Placement strategy: rule-based")
+        if self.placement_options_modal:
+            self.placement_options_modal.set_strategy(self.placement_strategy)
 
     def _generate_from_targets(self, config=None):
         """Run the generation pipeline and update the workspace."""
@@ -599,12 +630,15 @@ class BlueprintRenderer:
             progress_callback = self._on_genetic_progress
 
         self._genetic_progress = None
+        if self.placement_settings is None:
+            self._load_placement_settings()
         gen_result = run_generation_pipeline(
             targets,
             self._recipes_data,
             mode,
             placement,
             progress_callback=progress_callback,
+            placement_settings=self.placement_settings,
         )
         self._genetic_progress = None
         self.load_blueprint(gen_result)
@@ -618,6 +652,8 @@ class BlueprintRenderer:
         return True
 
     def _genetic_stale_limit(self):
+        if self.placement_settings:
+            return self.placement_settings.genetic.stale_generations_limit
         from planners.genetic_placement import STALE_GENERATIONS_LIMIT
         return STALE_GENERATIONS_LIMIT
 
@@ -674,11 +710,50 @@ class BlueprintRenderer:
             self.screen.blit(surf, rect)
             y += 32
 
+    def _load_placement_settings(self):
+        from core.app_config import load_config, load_placement_settings
+
+        self.placement_settings = load_placement_settings(load_config())
+
+    def _open_placement_options_modal(self):
+        """Show placement options for the current strategy (Rules or Genetic)."""
+        from core.placement_settings import PlacementSettingsBundle
+
+        if self.placement_settings is None:
+            self._load_placement_settings()
+        if self.placement_options_modal is None:
+            self.placement_options_modal = PlacementOptionsModal(
+                self.placement_strategy,
+                self.placement_settings,
+            )
+        else:
+            self.placement_options_modal.set_strategy(self.placement_strategy)
+            self.placement_options_modal.bundle = self.placement_settings
+        self.placement_options_modal.set_window_size(self.width, self.height)
+        self.show_placement_options = True
+        self.show_recipe_panel = False
+
+    def _handle_placement_options_action(self, action: str):
+        from core.app_config import save_placement_settings
+        from core.placement_settings import PlacementSettingsBundle
+
+        if action == "save" and self.placement_options_modal:
+            self.placement_settings = PlacementSettingsBundle(
+                rule_based=self.placement_options_modal.bundle.rule_based.clamp(),
+                genetic=self.placement_options_modal.bundle.genetic.clamp(),
+            )
+            save_placement_settings(self.placement_settings)
+            self.logger.info("Placement settings saved")
+        else:
+            self._load_placement_settings()
+        self.show_placement_options = False
+
     def _open_targets_modal(self):
         """Show the production-targets modal."""
         if self.recipe_panel is None:
             self.recipe_panel = RecipePanel()
         self.show_recipe_panel = True
+        self.show_placement_options = False
 
     def run_workspace(self, recipes_data, initial_targets=None, open_targets_modal=False):
         """Main workspace loop: canvas + toolbar, targets in a modal overlay.
@@ -708,8 +783,10 @@ class BlueprintRenderer:
         self.production_stages = []
         self.rate_summary = []
         self.show_recipe_panel = open_targets_modal
+        self.show_placement_options = False
         self.paused = False
         self._reset_camera()
+        self._load_placement_settings()
         self.toolbar.placement_strategy = self.placement_strategy
 
         while True:
@@ -721,6 +798,8 @@ class BlueprintRenderer:
                 return "exit"
             if action == "targets":
                 self._open_targets_modal()
+            elif action == "options":
+                self._open_placement_options_modal()
             elif action == "generate":
                 if not self._generate_from_targets():
                     self._open_targets_modal()
@@ -738,7 +817,9 @@ class BlueprintRenderer:
                 self._center_camera_on_blueprint()
 
             self._draw_workspace()
-            if self.show_recipe_panel and self.recipe_panel:
+            if self.show_placement_options and self.placement_options_modal:
+                self.placement_options_modal.draw(self.screen)
+            elif self.show_recipe_panel and self.recipe_panel:
                 self.recipe_panel.draw(self.screen)
             if self.paused:
                 self._draw_pause_menu()
@@ -775,7 +856,7 @@ class BlueprintRenderer:
             (160, 160, 170),
         )
         sub = pygame.font.Font(None, 24).render(
-            "Toggle Place: Rules / Genetic  |  T=targets  |  C=center  |  Scroll zoom, drag pan",
+            "Place: Rules/Genetic  |  O=options  |  T=targets  |  C=center  |  Scroll zoom, drag pan",
             True,
             (120, 120, 130),
         )

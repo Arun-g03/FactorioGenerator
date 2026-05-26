@@ -62,6 +62,7 @@ def run_generation_pipeline(
     generation_mode: GenerationMode = GenerationMode.ASSEMBLER_ONLY,
     placement_strategy: PlacementStrategy = PlacementStrategy.RULE_BASED,
     progress_callback=None,
+    placement_settings=None,
 ) -> BlueprintGenerationResult:
     """Stages: init → place entities → encode blueprint string."""
     logging.info("[%s] Initializing components...", GenerationStage.INIT)
@@ -84,6 +85,7 @@ def run_generation_pipeline(
         recipes_data,
         generation_mode,
         placement_strategy,
+        placement_settings=placement_settings,
     )
 
     logging.info("[%s] Placing entities and production stages...", GenerationStage.PLACE)

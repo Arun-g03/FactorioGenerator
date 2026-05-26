@@ -30,11 +30,17 @@ class Pathfinder:
                     neighbors.append(neighbor)
         return neighbors
 
+    def _is_belt_tile(self, x, y) -> bool:
+        name = self.grid.occupied.get((x, y), "")
+        return "belt" in name
+
     def shortest_path(self, start, goal):
         """A* algorithm to find the shortest path from start to goal."""
         logging.info(f"Finding shortest path from {start} to {goal}")
 
-        if self.grid.is_occupied(goal[0], goal[1]):
+        if self.grid.is_occupied(goal[0], goal[1]) and not self._is_belt_tile(
+            goal[0], goal[1]
+        ):
             logging.error(f"Goal position {goal} is occupied. Cannot find a valid path.")
             return None
 

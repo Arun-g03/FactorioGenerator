@@ -141,6 +141,8 @@ def network_origin_for_stage(
     nodes,
     stage_lanes: dict,
     cursor: NetworkLayoutCursor,
+    *,
+    connection_gap: int = CONNECTION_GAP,
 ) -> tuple[int, int, int]:
     """
     Top-left tile and belt flow direction for the first machine in a stage.
@@ -174,14 +176,15 @@ def network_origin_for_stage(
         for d in upstream
         if d in nodes
     )
-    clearance = max_stride + CONNECTION_GAP
+    clearance = max_stride + connection_gap
 
     best = None
     for direction in CARDINAL_FLOW_ORDER:
         mx, my = _machine_origin_for_feed(
             centroid[0], centroid[1], direction, w, h, clearance
         )
-        input_start, _ = machine_io_lanes(mx, my, w, h, direction)
+        lanes = machine_io_lanes(mx, my, w, h, direction)
+        input_start = lanes["input_start"]
         dist = _manhattan(centroid, input_start)
         if best is None or dist < best[0]:
             best = (dist, mx, my, direction)
@@ -196,17 +199,24 @@ def estimate_connection_cost(stage_lanes: dict, nodes) -> int:
     for item, node in nodes.items():
         if item not in stage_lanes:
             continue
-        consumer_in = stage_lanes[item]["input_start"]
-        offset = 0
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        input_connects = stage_lanes[item].get(
+            "input_connects",
+            stage_lanes[item].get("input_starts", [stage_lanes[item]["input_start"]]),
+        )
+        from planners.machine_io import ingredient_lane_index
+
         for dep in node.dependencies:
             if dep in BASE_MATERIALS or dep not in stage_lanes:
                 continue
-            producer_out = stage_lanes[dep]["output_end"]
-            target = (consumer_in[0], consumer_in[1] + offset * 2)
-            start = (producer_out[0] + 1, producer_out[1])
-            end = (target[0] - 1, target[1])
+            producer_out = stage_lanes[dep].get(
+                "output_start", stage_lanes[dep]["output_end"]
+            )
+            lane_idx = ingredient_lane_index(consumer_recipe, dep)
+            target = input_connects[min(lane_idx, len(input_connects) - 1)]
+            start = (producer_out[0] - 1, producer_out[1])
+            end = target
             total += _manhattan(start, end)
-            offset += 1
     return total
 
 
@@ -219,7 +229,9 @@ def evaluate_rule_machine_layout(
     """Score layout: viability first, then connection distance (network quality)."""
     stage_lanes = {}
     for item, machines in stage_machines.items():
-        lanes = stage_lanes_from_machines(machines)
+        node = nodes.get(item)
+        recipe = getattr(node, "recipe", None) if node else None
+        lanes = stage_lanes_from_machines(machines, recipe=recipe)
         if lanes:
             stage_lanes[item] = lanes
 

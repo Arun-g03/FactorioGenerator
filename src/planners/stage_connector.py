@@ -18,21 +18,53 @@ BASE_BUS_LENGTH = 40
 BLUEPRINT_START_CHEST = "wooden-chest"
 
 
-def machine_io_lanes(machine_x, machine_y, width, height, flow_direction=FACTORIO_EAST):
-    """Return (input_start, output_end) belt lane anchor tiles for one machine."""
+def machine_io_lanes(
+    machine_x,
+    machine_y,
+    width,
+    height,
+    flow_direction=FACTORIO_EAST,
+    *,
+    input_lane_count: int = 1,
+):
+    """Return belt lane anchor tiles for one machine (one input lane per ingredient)."""
     from planners.machine_io import machine_io_lanes as _io_lanes
 
-    return _io_lanes(machine_x, machine_y, width, height, flow_direction)
+    return _io_lanes(
+        machine_x,
+        machine_y,
+        width,
+        height,
+        flow_direction,
+        input_lane_count=input_lane_count,
+    )
 
 
-def stage_lanes_from_machines(machines, flow_direction=FACTORIO_EAST):
+def stage_lanes_from_machines(machines, flow_direction=FACTORIO_EAST, recipe: dict | None = None):
     """Aggregate I/O lane anchors for a stage with one or more machines in a row."""
     if not machines:
         return None
+    from planners.machine_io import recipe_input_lane_count
+
     ordered = sorted(machines, key=lambda m: (m[0], m[1]))
-    input_start, _ = machine_io_lanes(*ordered[0][:4], flow_direction)
-    _, output_end = machine_io_lanes(*ordered[-1][:4], flow_direction)
-    return {"input_start": input_start, "output_end": output_end}
+    lane_count = recipe_input_lane_count(recipe)
+    first_lanes = machine_io_lanes(
+        *ordered[0][:4], flow_direction, input_lane_count=lane_count
+    )
+    last_lanes = machine_io_lanes(
+        *ordered[-1][:4], flow_direction, input_lane_count=lane_count
+    )
+    return {
+        "input_starts": first_lanes["input_starts"],
+        "input_connects": first_lanes.get(
+            "input_connects", [first_lanes["input_start"]]
+        ),
+        "input_start": first_lanes["input_start"],
+        "input_connect": first_lanes.get("input_connect", first_lanes["input_start"]),
+        "output_start": first_lanes.get("output_start", first_lanes["output_end"]),
+        "output_end": last_lanes["output_end"],
+        "input_lane_count": lane_count,
+    }
 
 
 def _route_belt_path(grid, start, end):
@@ -329,7 +361,7 @@ def connect_lane_to_lane(
     Route belts from a producer's output lane to a consumer's input lane.
 
     producer_output: (x, y) of the eastmost output belt tile
-    consumer_input: (x, y) of the westmost input belt tile
+    consumer_input: (x, y) tile where upstream belts meet the consumer input row
     lane_offset: vertical offset for parallel ingredient feeds
     """
     out_x, out_y = producer_output
@@ -390,7 +422,8 @@ def connect_stages(
     """
     stage_lanes = {}
     for item, machines in stage_machines.items():
-        lanes = stage_lanes_from_machines(machines)
+        recipe = getattr(nodes.get(item), "recipe", None)
+        lanes = stage_lanes_from_machines(machines, recipe=recipe)
         if lanes:
             stage_lanes[item] = lanes
 
@@ -401,7 +434,13 @@ def connect_stages(
             continue
 
         consumer_lanes = stage_lanes[consumer_item]
-        ingredient_index = 0
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        input_connects = consumer_lanes.get(
+            "input_connects",
+            consumer_lanes.get("input_starts", [consumer_lanes["input_start"]]),
+        )
+
+        from planners.machine_io import ingredient_lane_index
 
         for dep in node.dependencies:
             if dep in BASE_MATERIALS:
@@ -410,21 +449,23 @@ def connect_stages(
                 continue
 
             producer_lanes = stage_lanes[dep]
-            producer_output_end = producer_lanes["output_end"]
-            consumer_input_start = consumer_lanes["input_start"]
-            lane_offset = ingredient_index * 2
-            target_y = consumer_input_start[1] + lane_offset
+            producer_output = producer_lanes.get(
+                "output_start", producer_lanes["output_end"]
+            )
+            lane_idx = ingredient_lane_index(consumer_recipe, dep)
+            consumer_input_start = input_connects[
+                min(lane_idx, len(input_connects) - 1)
+            ]
 
-            requests_by_producer.setdefault(producer_output_end, []).append(
+            requests_by_producer.setdefault(producer_output, []).append(
                 {
                     "consumer_input_start": consumer_input_start,
-                    "target_y": target_y,
-                    "lane_offset": lane_offset,
+                    "target_y": consumer_input_start[1],
+                    "lane_offset": 0,
                     "consumer_item": consumer_item,
                     "dep": dep,
                 }
             )
-            ingredient_index += 1
 
     if placement_recorder is not None:
         placement_recorder.record(
@@ -553,12 +594,20 @@ def connect_base_materials(
     for item, node in nodes.items():
         if item not in stage_machines:
             continue
-        lanes = stage_lanes_from_machines(stage_machines[item])
+        lanes = stage_lanes_from_machines(
+            stage_machines[item], recipe=getattr(node, "recipe", None)
+        )
         if not lanes:
             continue
+        input_starts = lanes.get("input_starts", [lanes["input_start"]])
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        from planners.machine_io import ingredient_lane_index
+
         for dep in node.dependencies:
             if dep in BASE_MATERIALS:
-                base_demands.setdefault(dep, []).append(lanes["input_start"])
+                lane_idx = ingredient_lane_index(consumer_recipe, dep)
+                anchor = input_starts[min(lane_idx, len(input_starts) - 1)]
+                base_demands.setdefault(dep, []).append(anchor)
 
     if not base_demands:
         return entity_number, {}

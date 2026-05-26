@@ -54,12 +54,13 @@ class Toolbar:
         button_spacing = 10
         x = 12
         button_widths = {
-            "targets": 118,
-            "generate": 100,
-            "placement": 128,
-            "center": 96,
-            "copy": 118,
-            "pause": 100,
+            "targets": 110,
+            "generate": 92,
+            "placement": 118,
+            "options": 92,
+            "center": 88,
+            "copy": 100,
+            "pause": 88,
         }
 
         from core.constants import PlacementStrategy
@@ -69,7 +70,7 @@ class Toolbar:
             placement_label = "Genetic"
 
         button_defs = [
-            ("targets", "Set Targets", button_widths["targets"], self.button_color),
+            ("targets", "Targets", button_widths["targets"], self.button_color),
             ("generate", "Generate", button_widths["generate"], self.generate_color),
             (
                 "placement",
@@ -79,6 +80,7 @@ class Toolbar:
                 if self.placement_strategy == PlacementStrategy.GENETIC
                 else (70, 85, 100),
             ),
+            ("options", "Options", button_widths["options"], (85, 95, 115)),
             ("center", "Center", button_widths["center"], (70, 110, 130)),
             ("copy", "Copy BP", button_widths["copy"], self.button_color),
             ("pause", "Pause", button_widths["pause"], self.button_color),

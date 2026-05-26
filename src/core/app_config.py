@@ -56,6 +56,20 @@ def save_window_size(width: int, height: int) -> None:
     save_config({"window_width": int(width), "window_height": int(height)})
 
 
+def load_placement_settings(config: dict | None = None):
+    """Placement tunables from config (rule-based + genetic)."""
+    from core.placement_settings import bundle_from_config
+
+    return bundle_from_config(config if config is not None else load_config())
+
+
+def save_placement_settings(bundle) -> None:
+    """Persist placement_settings section in config.json."""
+    from core.placement_settings import bundle_to_config_dict
+
+    save_config(bundle_to_config_dict(bundle))
+
+
 def apply_factorio_paths(config: dict | None = None) -> None:
     """Apply Factorio install/graphics paths from config to constants."""
     from core import constants as constants_module

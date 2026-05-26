@@ -199,16 +199,26 @@ def _machine_cells(x: int, y: int, w: int, h: int) -> set[tuple[int, int]]:
     return {(x + dx, y + dy) for dx in range(w) for dy in range(h)}
 
 
-def _machine_io_tiles(mx: int, my: int, w: int, h: int) -> set[tuple[int, int]]:
-    lane_y = my + h // 2
-    tiles = set()
-    for i in range(3):
-        tiles.add((mx - 4 + i, lane_y))
-    for i in range(3):
-        tiles.add((mx + w + 1 + i, lane_y))
-    tiles.add((mx - 1, lane_y))
-    tiles.add((mx + w, lane_y))
-    return tiles
+def _machine_io_tiles(
+    mx: int,
+    my: int,
+    w: int,
+    h: int,
+    *,
+    recipe: dict | None = None,
+    flow_direction: int | None = None,
+) -> set[tuple[int, int]]:
+    from core.constants import FACTORIO_EAST
+    from planners.machine_io import machine_io_tiles_for_block, recipe_input_lane_count
+
+    return machine_io_tiles_for_block(
+        mx,
+        my,
+        w,
+        h,
+        input_lane_count=recipe_input_lane_count(recipe),
+        flow_direction=flow_direction or FACTORIO_EAST,
+    )
 
 
 def _machine_center(mx: int, my: int, w: int, h: int) -> tuple[float, float]:
@@ -247,14 +257,16 @@ def evaluate_stage_layout(
     io_tiles_by_machine: list[set[tuple[int, int]]] = []
 
     for item, machines in stage_machines.items():
-        lanes = stage_lanes_from_machines(machines)
+        node = nodes.get(item)
+        recipe = getattr(node, "recipe", None) if node else None
+        lanes = stage_lanes_from_machines(machines, recipe=recipe)
         if lanes:
             stage_lanes[item] = lanes
         for mx, my, w, h in machines:
             mx, my, w, h = int(mx), int(my), int(w), int(h)
             cells = _machine_cells(mx, my, w, h)
             machine_footprints.append((item, cells))
-            io_tiles_by_machine.append(_machine_io_tiles(mx, my, w, h))
+            io_tiles_by_machine.append(_machine_io_tiles(mx, my, w, h, recipe=recipe))
             all_machine_cells |= cells
 
     counts = expected_counts or {
@@ -332,12 +344,18 @@ def evaluate_stage_layout(
             continue
 
         consumer = stage_lanes[item]
-        consumer_in = consumer["input_start"]
-        ingredient_index = 0
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        input_connects = consumer.get(
+            "input_connects", consumer.get("input_starts", [consumer["input_start"]])
+        )
+
+        from planners.machine_io import ingredient_lane_index
 
         for dep in node.dependencies:
             if dep in BASE_MATERIALS:
-                base_material_feeds.setdefault(dep, []).append(consumer_in)
+                lane_idx = ingredient_lane_index(consumer_recipe, dep)
+                anchor = input_connects[min(lane_idx, len(input_connects) - 1)]
+                base_material_feeds.setdefault(dep, []).append(anchor)
                 continue
 
             if dep not in stage_lanes:
@@ -345,18 +363,13 @@ def evaluate_stage_layout(
                 continue
 
             producer = stage_lanes[dep]
-            producer_out = producer["output_end"]
-            target_in = (consumer_in[0], consumer_in[1] + ingredient_index * 2)
+            producer_out = producer.get("output_start", producer["output_end"])
+            lane_idx = ingredient_lane_index(consumer_recipe, dep)
+            target_in = input_connects[min(lane_idx, len(input_connects) - 1)]
 
-            route_start = (producer_out[0] + 1, producer_out[1])
-            route_end = (target_in[0] - 1, target_in[1])
+            route_start = (producer_out[0] - 1, producer_out[1])
+            route_end = target_in
             estimated_belts += max(_manhattan_path_length(route_start, route_end), 0)
-            if ingredient_index > 0:
-                estimated_belts += _manhattan_path_length(
-                    (target_in[0] - 1, target_in[1]),
-                    (consumer_in[0] - 1, consumer_in[1]),
-                )
-            ingredient_index += 1
 
     for bus_index, (resource, input_points) in enumerate(base_material_feeds.items()):
         bus_y = BASE_BUS_Y + bus_index * 2

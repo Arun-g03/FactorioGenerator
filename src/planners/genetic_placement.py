@@ -486,8 +486,19 @@ def place_machines_from_genetic_layout(planner, entities, entity_number, machine
 
         planner.stage_machines.setdefault(item, []).append((mx, my, w, h))
 
+        from planners.machine_io import recipe_input_lane_count
+
         entity_number = place_machine_io_block(
-            planner.grid, entities, entity_number, mx, my, w, h, flow_east=True
+            planner.grid,
+            entities,
+            entity_number,
+            mx,
+            my,
+            w,
+            h,
+            flow_east=True,
+            recipe=recipe,
+            input_lane_count=recipe_input_lane_count(recipe),
         )
 
         if item not in stages_by_item:
