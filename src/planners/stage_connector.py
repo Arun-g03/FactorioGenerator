@@ -35,6 +35,20 @@ def stage_lanes_from_machines(machines, flow_direction=FACTORIO_EAST):
     return {"input_start": input_start, "output_end": output_end}
 
 
+def _route_belt_path(grid, start, end):
+    """Prefer A* around obstacles; fall back to an L-shaped Manhattan path."""
+    from core.pathfinding import Pathfinder
+
+    if start == end:
+        return [start]
+
+    pathfinder = Pathfinder(grid)
+    routed = pathfinder.shortest_path(start, end)
+    if routed and len(routed) >= 2:
+        return routed
+    return _manhattan_path(start, end)
+
+
 def _manhattan_path(start, end):
     """Build an L-shaped path from start to end (horizontal first, then vertical)."""
     path = [start]
@@ -55,10 +69,24 @@ def _manhattan_path(start, end):
 
 
 def _belt_direction_at(path, index):
-    """Direction a belt should face to carry items along path[index] -> path[index+1]."""
-    if index + 1 >= len(path):
-        return FACTORIO_EAST
-    return direction_for_flow(path[index], path[index + 1])
+    """Direction a belt should face on this path tile (straight or 90° curve)."""
+    from core.constants import belt_direction_at_path_index
+
+    return belt_direction_at_path_index(path, index)
+
+
+def _is_belt_occupant(name: str) -> bool:
+    return "transport-belt" in name or "underground-belt" in name
+
+
+def _update_belt_direction(entities, x, y, direction):
+    """Update direction on an existing surface belt at a tile."""
+    for entity in entities:
+        pos = entity.get("position") or {}
+        if int(round(pos.get("x", 0))) == x and int(round(pos.get("y", 0))) == y:
+            if _is_belt_occupant(entity.get("name", "")):
+                entity["direction"] = direction
+                return
 
 
 def _place_belt(grid, entities, entity_number, x, y, direction):
@@ -115,8 +143,14 @@ def _place_underground_pair(
     if span_tiles < 1 or span_tiles > max_tiles:
         return entity_number
 
-    if grid.is_occupied(input_x, input_y) or grid.is_occupied(output_x, output_y):
-        return entity_number
+    if grid.is_occupied(input_x, input_y):
+        occupant = grid.occupied.get((input_x, input_y), "")
+        if not _is_belt_occupant(occupant):
+            return entity_number
+    if grid.is_occupied(output_x, output_y):
+        occupant = grid.occupied.get((output_x, output_y), "")
+        if not _is_belt_occupant(occupant):
+            return entity_number
 
     entities.append({
         "entity_number": entity_number,
@@ -139,6 +173,47 @@ def _place_underground_pair(
     return entity_number + 1
 
 
+def _try_underground_bridge(grid, entities, entity_number, path, start_index):
+    """
+    Bridge a straight blocked run with underground belts.
+
+    Returns (entity_number, next_index) when a pair was placed, else (entity_number, None).
+    """
+    if start_index + 2 >= len(path):
+        return entity_number, None
+
+    start = path[start_index]
+    direction = direction_for_flow(start, path[start_index + 1])
+    blocked_end = start_index + 1
+    while blocked_end < len(path):
+        step = direction_for_flow(path[blocked_end - 1], path[blocked_end])
+        if step != direction:
+            break
+        if not grid.is_occupied(*path[blocked_end]):
+            break
+        blocked_end += 1
+
+    if blocked_end >= len(path) or blocked_end <= start_index + 1:
+        return entity_number, None
+
+    exit_pos = path[blocked_end]
+    if grid.is_occupied(*exit_pos):
+        return entity_number, None
+
+    updated = _place_underground_pair(
+        grid,
+        entities,
+        entity_number,
+        start,
+        exit_pos,
+        direction,
+        name="underground-belt",
+    )
+    if updated == entity_number:
+        return entity_number, None
+    return updated, blocked_end
+
+
 def place_belt_path(grid, entities, entity_number, path):
     """
     Place belts along a tile path with correct flow directions.
@@ -150,58 +225,31 @@ def place_belt_path(grid, entities, entity_number, path):
         return entity_number
 
     index = 0
-    while index < len(path) - 1:
+    while index < len(path):
         x, y = path[index]
         direction = _belt_direction_at(path, index)
 
         if grid.is_occupied(x, y):
+            occupant = grid.occupied.get((x, y), "")
+            if _is_belt_occupant(occupant):
+                _update_belt_direction(entities, x, y, direction)
+                index += 1
+                continue
+
+            bridge_from = index - 1 if index > 0 else index
+            entity_number, skip_to = _try_underground_bridge(
+                grid, entities, entity_number, path, bridge_from
+            )
+            if skip_to is not None:
+                index = skip_to
+                continue
+
             index += 1
             continue
-
-        next_x, next_y = path[index + 1]
-        if not grid.is_occupied(next_x, next_y):
-            entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
-            index += 1
-            continue
-
-        blocked_end = index + 1
-        while blocked_end < len(path) and grid.is_occupied(*path[blocked_end]):
-            if blocked_end > index + 1:
-                prev_step = direction_for_flow(path[blocked_end - 1], path[blocked_end])
-                if prev_step != direction:
-                    break
-            blocked_end += 1
-
-        if blocked_end >= len(path):
-            entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
-            index += 1
-            continue
-
-        if blocked_end > index + 1:
-            step_to_exit = direction_for_flow(path[blocked_end - 1], path[blocked_end])
-            if step_to_exit == direction and not grid.is_occupied(*path[blocked_end]):
-                updated = _place_underground_pair(
-                    grid,
-                    entities,
-                    entity_number,
-                    (x, y),
-                    path[blocked_end],
-                    direction,
-                    name="underground-belt",
-                )
-                if updated != entity_number:
-                    entity_number = updated
-                    index = blocked_end
-                    continue
 
         entity_number = _place_belt(grid, entities, entity_number, x, y, direction)
         index += 1
 
-    last_x, last_y = path[-1]
-    if not grid.is_occupied(last_x, last_y):
-        prev_x, prev_y = path[-2]
-        direction = direction_for_flow((prev_x, prev_y), (last_x, last_y))
-        entity_number = _place_belt(grid, entities, entity_number, last_x, last_y, direction)
     return entity_number
 
 
@@ -285,17 +333,20 @@ def connect_lane_to_lane(
     in_x, in_y = consumer_input
     target_y = in_y + lane_offset
 
-    start = (out_x + 1, out_y)
-    end = (in_x - 1, target_y)
+    start = (out_x, out_y)
+    if lane_offset == 0:
+        end = (in_x, in_y)
+    else:
+        end = (in_x - 1, target_y)
 
     if start == end:
         return entity_number
 
-    path = _manhattan_path(start, end)
+    path = _route_belt_path(grid, start, end)
     entity_number = place_belt_path(grid, entities, entity_number, path)
 
     if lane_offset != 0:
-        merge_path = _manhattan_path((in_x - 1, target_y), (in_x - 1, in_y))
+        merge_path = _route_belt_path(grid, (in_x - 1, target_y), (in_x, in_y))
         entity_number = place_belt_path(grid, entities, entity_number, merge_path)
 
     logger.info(

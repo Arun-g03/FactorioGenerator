@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from core.constants import (
+    BELT_CORNER_DIRECTIONS,
     BELT_ENTITIES,
     DIRECTION_FRONT_OFFSET,
     FACTORIO_EAST,
@@ -23,6 +24,8 @@ from core.constants import (
     inserter_drop_tile,
     inserter_pickup_tile,
 )
+
+_CORNER_TO_ARMS = {curve: arms for arms, curve in BELT_CORNER_DIRECTIONS.items()}
 
 SPLITTER_NAMES = frozenset(
     {"splitter", "fast-splitter", "express-splitter", "turbo-splitter"}
@@ -171,8 +174,16 @@ def build_flow_adjacency(
         dx, dy = DIRECTION_FRONT_OFFSET.get(direction, (1, 0))
 
         if _is_belt(name):
-            _add_edge(adj, (x - dx, y - dy), (x, y))
-            _add_edge(adj, (x, y), (x + dx, y + dy))
+            arms = _CORNER_TO_ARMS.get(direction)
+            if arms is not None:
+                in_dir, out_dir = arms
+                in_dx, in_dy = DIRECTION_FRONT_OFFSET[in_dir]
+                out_dx, out_dy = DIRECTION_FRONT_OFFSET[out_dir]
+                _add_edge(adj, (x - in_dx, y - in_dy), (x, y))
+                _add_edge(adj, (x, y), (x + out_dx, y + out_dy))
+            else:
+                _add_edge(adj, (x - dx, y - dy), (x, y))
+                _add_edge(adj, (x, y), (x + dx, y + dy))
         elif _is_inserter(name):
             pickup = inserter_pickup_tile((x, y), direction)
             drop = inserter_drop_tile((x, y), direction)
@@ -261,7 +272,12 @@ def _flow_endpoint_tiles(
 
 
 def _belt_outputs_to(pickup: tuple[int, int], tile_map: dict[tuple[int, int], dict], adj) -> bool:
-    """True if a neighboring belt delivers items into ``pickup``."""
+    """True if a belt delivers items into ``pickup`` (neighbor or same tile)."""
+    on_tile = tile_map.get(pickup)
+    if on_tile and _is_belt(on_tile.get("name", "")):
+        for src, targets in adj.items():
+            if src != pickup and pickup in targets:
+                return True
     for neighbor, entity in _neighbors(pickup, tile_map):
         if _is_belt(entity.get("name", "")) and pickup in adj.get(neighbor, ()):
             return True
@@ -269,7 +285,10 @@ def _belt_outputs_to(pickup: tuple[int, int], tile_map: dict[tuple[int, int], di
 
 
 def _belt_receives_from(drop: tuple[int, int], tile_map: dict[tuple[int, int], dict], adj) -> bool:
-    """True if a neighboring belt accepts items from ``drop``."""
+    """True if a belt accepts items from ``drop`` (neighbor or same tile)."""
+    on_tile = tile_map.get(drop)
+    if on_tile and _is_belt(on_tile.get("name", "")) and adj.get(drop):
+        return True
     for neighbor, entity in _neighbors(drop, tile_map):
         if _is_belt(entity.get("name", "")) and neighbor in adj.get(drop, ()):
             return True

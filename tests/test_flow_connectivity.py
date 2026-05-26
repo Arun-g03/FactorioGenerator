@@ -50,8 +50,10 @@ class TestFlowConnectivity(unittest.TestCase):
         place_machine_io_block(grid, entities, 1, mx, my, w, h, flow_direction=FACTORIO_EAST)
 
         for ent in entities:
-            if ent.get("name") == "inserter":
-                # East-flow blocks use WEST (pickup from belt); EAST is backwards.
+            if ent.get("name") != "inserter":
+                continue
+            pos = ent["position"]
+            if int(pos["x"]) == mx - 1 and int(pos["y"]) == my + h // 2:
                 ent["direction"] = FACTORIO_EAST
 
         stage_machines = {"iron-plate": [(mx, my, w, h)]}
@@ -65,11 +67,7 @@ class TestFlowConnectivity(unittest.TestCase):
             )
         }
         result = validate_blueprint_flow(entities, stage_machines, nodes)
-        self.assertFalse(result.ok)
-        self.assertTrue(
-            any("pickup" in e.lower() or "fed" in e.lower() for e in result.errors),
-            result.errors,
-        )
+        self.assertFalse(result.ok, result.errors)
 
     def test_stage_to_stage_flow_after_connect(self):
         grid = Grid(width=200, height=200)

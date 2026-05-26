@@ -44,22 +44,8 @@ BASE_MATERIALS = {"iron-ore", "copper-ore", "coal", "water", "crude-oil", "stone
 # ---------------------------------------------------------------------------
 FACTORIO_BLUEPRINT_VERSION = 562949958402048
 
-# ---------------------------------------------------------------------------
-# Factorio 2.0 directions (defines.direction — values doubled vs 1.1).
-# Verified in-game: N=0 (omitted in JSON), E=4, S=8, W=12.
-# See wiki Blueprint_string_format and 2.0 mod porting guide.
-# ---------------------------------------------------------------------------
-FACTORIO_BLUEPRINT_VERSION = 562949958402048
-
 DIRECTIONS = {
     "north": 0,
-    "northeast": 2,
-    "east": 4,
-    "southeast": 6,
-    "south": 8,
-    "southwest": 10,
-    "west": 12,
-    "northwest": 14,
     "northeast": 2,
     "east": 4,
     "southeast": 6,
@@ -93,18 +79,41 @@ DIRECTION_FRONT_OFFSET = {
     FACTORIO_WEST: (-1, 0),
 }
 
-# Pygame sprite suffix for each blueprint direction (diagonals map to nearest cardinal).
+# Belt curve sprites (incoming flow -> outgoing flow at a 90° path vertex).
+BELT_CORNER_DIRECTIONS = {
+    (FACTORIO_EAST, FACTORIO_NORTH): FACTORIO_NORTHWEST,
+    (FACTORIO_EAST, FACTORIO_SOUTH): FACTORIO_SOUTHEAST,
+    (FACTORIO_WEST, FACTORIO_NORTH): FACTORIO_NORTHEAST,
+    (FACTORIO_WEST, FACTORIO_SOUTH): FACTORIO_SOUTHWEST,
+    (FACTORIO_NORTH, FACTORIO_EAST): FACTORIO_NORTHEAST,
+    (FACTORIO_NORTH, FACTORIO_WEST): FACTORIO_NORTHWEST,
+    (FACTORIO_SOUTH, FACTORIO_EAST): FACTORIO_SOUTHEAST,
+    (FACTORIO_SOUTH, FACTORIO_WEST): FACTORIO_SOUTHWEST,
+}
+
+BELT_CORNER_SPRITE_SUFFIX = {
+    (FACTORIO_EAST, FACTORIO_NORTH): "east-to-north",
+    (FACTORIO_EAST, FACTORIO_SOUTH): "east-to-south",
+    (FACTORIO_WEST, FACTORIO_NORTH): "west-to-north",
+    (FACTORIO_WEST, FACTORIO_SOUTH): "west-to-south",
+    (FACTORIO_NORTH, FACTORIO_EAST): "north-to-east",
+    (FACTORIO_NORTH, FACTORIO_WEST): "north-to-west",
+    (FACTORIO_SOUTH, FACTORIO_EAST): "south-to-east",
+    (FACTORIO_SOUTH, FACTORIO_WEST): "south-to-west",
+}
+
+# Pygame sprite suffix for straight belts and inserter platforms.
 CARDINAL_DIRECTION_SUFFIX = {
     None: "north",
     FACTORIO_NORTH: "north",
-    FACTORIO_NORTHEAST: "north",
     FACTORIO_EAST: "east",
-    FACTORIO_SOUTHEAST: "east",
     FACTORIO_SOUTH: "south",
-    FACTORIO_SOUTHWEST: "south",
     FACTORIO_WEST: "west",
-    FACTORIO_NORTHWEST: "west",
 }
+
+BELT_DIRECTION_SUFFIX = dict(CARDINAL_DIRECTION_SUFFIX)
+for corner_key, blueprint_dir in BELT_CORNER_DIRECTIONS.items():
+    BELT_DIRECTION_SUFFIX[blueprint_dir] = BELT_CORNER_SPRITE_SUFFIX[corner_key]
 
 # Screen-space unit vectors for UI arrows (y increases downward on screen).
 CARDINAL_ARROW_VECTOR = {
@@ -116,8 +125,29 @@ CARDINAL_ARROW_VECTOR = {
 
 
 def direction_sprite_suffix(direction):
-    """Map a Factorio blueprint direction to a cardinal sprite name (north/east/south/west)."""
+    """Map a Factorio blueprint direction to a sprite suffix (straight or curve)."""
+    if direction in BELT_DIRECTION_SUFFIX:
+        return BELT_DIRECTION_SUFFIX[direction]
     return CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
+
+
+def belt_direction_at_path_index(path: list[tuple[int, int]], index: int) -> int:
+    """
+    Blueprint direction for a belt on ``path[index]``.
+
+    Straight segments use the segment cardinal; 90° vertices use a diagonal curve.
+    """
+    if len(path) < 2:
+        return FACTORIO_EAST
+    if index <= 0:
+        return direction_for_flow(path[0], path[1])
+    if index >= len(path) - 1:
+        return direction_for_flow(path[-2], path[-1])
+    in_dir = direction_for_flow(path[index - 1], path[index])
+    out_dir = direction_for_flow(path[index], path[index + 1])
+    if in_dir == out_dir:
+        return out_dir
+    return BELT_CORNER_DIRECTIONS.get((in_dir, out_dir), out_dir)
 
 
 def direction_arrow_vector(direction):
