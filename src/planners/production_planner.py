@@ -10,6 +10,7 @@ from core.constants import (
     BASE_MATERIALS,
     GenerationMode,
     TRANSPORT_BELT_THROUGHPUT_PER_MIN,
+    machine_io_stride,
 )
 from planners.machine_placer.calculations import ProductionCalculator
 from planners.machine_placer.positioning import PositionFinder
@@ -58,6 +59,7 @@ class ProductionPlanner:
         self.layout_fitness = None
         self.genetic_generations = 0
         self.genetic_converged = False
+        self.blueprint_start: tuple[int, int] | None = None
 
     def build_rate_graph(self, targets: dict[str, float]):
         """Populate self.nodes from user targets and mode."""
@@ -127,7 +129,8 @@ class ProductionPlanner:
 
     def _allocate_stage_position(self, item, machine_w, machine_h, machine_count):
         """Allocate origin for a stage (row of machines along X)."""
-        total_width = machine_count * (machine_w + 6) + 6
+        stride = machine_io_stride(machine_w)
+        total_width = machine_count * stride + 6
         x_start = self._next_stage_x
         y_start = self._stage_y
         self._next_stage_x += total_width + self._stage_spacing
@@ -153,7 +156,7 @@ class ProductionPlanner:
         )
 
         for i in range(node.machine_count):
-            mx = x_start + i * (w + 6)
+            mx = x_start + i * machine_io_stride(w)
             my = y_start
             if self.grid.is_occupied(mx, my, w, h):
                 alt = self.position_finder.find_next_available_position_with_spacing(w, h)
@@ -186,10 +189,11 @@ class ProductionPlanner:
         """Route belts between stages and from base-material buses."""
         from planners.stage_connector import connect_base_materials, connect_stages
 
+        self.blueprint_start = None
         entity_number = connect_stages(
             self.grid, entities, entity_number, self.stage_machines, self.nodes
         )
-        entity_number = connect_base_materials(
+        entity_number, self.blueprint_start = connect_base_materials(
             self.grid, entities, entity_number, self.stage_machines, self.nodes
         )
         return entity_number

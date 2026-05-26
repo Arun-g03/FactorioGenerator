@@ -58,9 +58,11 @@ class MachinePlacement:
         entity_number += 1
 
         # Place inserters with validation
+        from core.constants import FACTORIO_EAST, FACTORIO_WEST
+
         directions = {
-            "input": {"x_offset": -1, "y_offset": h // 2, "direction": 4},  # East
-            "output": {"x_offset": w, "y_offset": h // 2, "direction": 6},  # West
+            "input": {"x_offset": -1, "y_offset": h // 2, "direction": FACTORIO_EAST},
+            "output": {"x_offset": w, "y_offset": h // 2, "direction": FACTORIO_WEST},
         }
 
         for inserter_type, params in directions.items():

@@ -7,34 +7,21 @@ class SpriteMapper:
     Handles directional variants for belts and inserters.
     """
 
-    # Factorio blueprint directions 0–7 (see core.constants.DIRECTIONS)
-    CARDINAL_DIRECTION_SUFFIX = {
-        None: "north",
-        0: "north",
-        1: "north",
-        2: "east",
-        3: "east",
-        4: "south",
-        5: "south",
-        6: "west",
-        7: "north",
-    }
-
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
     def get_sprite_name(self, entity_name, direction=None):
-        from core.constants import BELT_ENTITIES
+        from core.constants import BELT_ENTITIES, direction_sprite_suffix
 
         if entity_name in BELT_ENTITIES:
-            suffix = self.CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
+            suffix = direction_sprite_suffix(direction)
             return f"{entity_name}-{suffix}"
 
         if "underground-belt" in entity_name:
             return f"{entity_name}-structure"
 
         if "inserter" in entity_name:
-            suffix = self.CARDINAL_DIRECTION_SUFFIX.get(direction, "east")
+            suffix = direction_sprite_suffix(direction)
             directional = f"{entity_name}-platform-{suffix}"
             if direction is not None:
                 return directional

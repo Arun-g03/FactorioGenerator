@@ -232,41 +232,95 @@
         "belt_speed": null 
       },
       "splitter": {
+        "type": "splitter",
         "ingredients": {
           "iron-plate": 5,
           "iron-gear-wheel": 5,
           "electronic-circuit": 2
         },
         "machine": "assembling-machine-1",
-        "machine_size": [1, 2],
+        "machine_size": [2, 1],
         "crafting_speed": 0.5,
-        "belt_speed": 15 
+        "belt_speed": 15,
+        "lanes": 2,
+        "behavior": "balance"
       },
       "fast-splitter": {
+        "type": "splitter",
         "ingredients": {
           "splitter": 1,
           "iron-gear-wheel": 10,
           "electronic-circuit": 10
         },
         "machine": "assembling-machine-2",
-        "machine_size": [1, 2],
+        "machine_size": [2, 1],
         "crafting_speed": 0.75,
-        "belt_speed": 30  
+        "belt_speed": 30,
+        "lanes": 2,
+        "behavior": "balance"
       },
       "express-splitter": {
+        "type": "splitter",
         "ingredients": {
           "fast-splitter": 1,
           "iron-gear-wheel": 10,
           "lubricant": 1
         },
         "machine": "assembling-machine-2",
-        "machine_size": [1, 2],
+        "machine_size": [2, 1],
         "crafting_speed": 0.75,
-        "belt_speed": 45  
+        "belt_speed": 45,
+        "lanes": 2,
+        "behavior": "balance"
+      },
+      "turbo-splitter": {
+        "type": "splitter",
+        "ingredients": {
+          "express-splitter": 1,
+          "tungsten-plate": 15,
+          "processing-unit": 2,
+          "lubricant": 80
+        },
+        "machine": "foundry",
+        "machine_size": [2, 1],
+        "crafting_time": 2,
+        "belt_speed": 60,
+        "lanes": 2,
+        "behavior": "balance",
+        "expansion": "space-age"
       },
 
-   
-    
+    "wooden-chest": {
+      "type": "storage",
+      "ingredients": {
+        "wood": 2
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1, 1],
+      "crafting_speed": 0.5,
+      "inventory_slots": 16
+    },
+    "iron-chest": {
+      "type": "storage",
+      "ingredients": {
+        "iron-plate": 8
+      },
+      "machine": "assembling-machine-1",
+      "machine_size": [1, 1],
+      "crafting_speed": 0.5,
+      "inventory_slots": 32
+    },
+    "steel-chest": {
+      "type": "storage",
+      "ingredients": {
+        "steel-plate": 8
+      },
+      "machine": "assembling-machine-2",
+      "machine_size": [1, 1],
+      "crafting_speed": 0.75,
+      "inventory_slots": 48
+    },
+
     "inserter": {
       "ingredients": {
         "iron-plate": 1,

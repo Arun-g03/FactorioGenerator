@@ -17,29 +17,28 @@ def place_machine_io_block(
     Place input belts, input inserter, output inserter, and output belts for one machine.
 
     Layout (flow east): [belt][belt][belt] -> [inserter] -> [machine] -> [inserter] -> [belt][belt][belt]
+
+    Inserter direction faces the drop tile (front); pickup is the tile behind the inserter.
     """
     belt_count = 3
     lane_y = machine_y + machine_h // 2
 
     if flow_east:
         belt_direction = FACTORIO_EAST
-        # [belt][belt][belt] -> [inserter] -> [machine] -> [inserter] -> [belt][belt][belt]
         input_belt_start_x = machine_x - belt_count - 1
         output_belt_start_x = machine_x + machine_w + 1
         input_inserter_pos = (machine_x - 1, lane_y)
         output_inserter_pos = (machine_x + machine_w, lane_y)
-        inserter_pickup = (input_inserter_pos[0] - 1, lane_y)
-        inserter_drop = (output_inserter_pos[0] + 1, lane_y)
+        input_drop = (machine_x, lane_y)
+        output_drop = (machine_x + machine_w + 1, lane_y)
     else:
         belt_direction = direction_for_flow((machine_x, lane_y), (machine_x, lane_y + 1))
         input_belt_start_x = machine_x
         output_belt_start_x = machine_x
         input_inserter_pos = (machine_x + machine_w // 2, machine_y - 1)
         output_inserter_pos = (machine_x + machine_w // 2, machine_y + machine_h)
-        inserter_pickup = (input_inserter_pos[0], input_inserter_pos[1] - 1)
-        inserter_drop = output_inserter_pos
-
-    machine_center = (machine_x + machine_w // 2, machine_y + machine_h // 2)
+        input_drop = (machine_x + machine_w // 2, machine_y)
+        output_drop = (machine_x + machine_w // 2, machine_y + machine_h + 1)
 
     for i in range(belt_count):
         if flow_east:
@@ -60,7 +59,7 @@ def place_machine_io_block(
 
     ix, iy = input_inserter_pos
     if not grid.is_occupied(ix, iy):
-        in_dir = direction_for_inserter(inserter_pickup, machine_center)
+        in_dir = direction_for_inserter(input_inserter_pos, input_drop)
         entities.append({
             "entity_number": entity_number,
             "name": "inserter",
@@ -89,7 +88,7 @@ def place_machine_io_block(
 
     ox, oy = output_inserter_pos
     if not grid.is_occupied(ox, oy):
-        out_dir = direction_for_inserter(machine_center, inserter_drop)
+        out_dir = direction_for_inserter(output_inserter_pos, output_drop)
         entities.append({
             "entity_number": entity_number,
             "name": "inserter",

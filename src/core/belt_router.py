@@ -73,7 +73,8 @@ class BeltRouter:
 
     def route_belt_with_splitters(self, entities, entity_number, start_x, start_y, end_x, end_y, resource, use_underground=False):
         """
-        Routes a belt, using splitters and underground belts when necessary.
+        Legacy path routing. Splitters are placed only in stage_connector when a
+        producer output fans out to multiple consumer stages; this method routes belts only.
         """
         start = (start_x, start_y)
         end = (end_x, end_y)
@@ -110,22 +111,5 @@ class BeltRouter:
 
             self.grid.occupy(x, y, "transport-belt", [1, 1])
             entity_number += 1
-
-        # Place splitters at the start and end
-        entities.append({
-            "entity_number": entity_number,
-            "name": "splitter",
-            "position": {"x": start_x, "y": start_y}
-        })
-        self.grid.occupy(start_x, start_y, "splitter", [1, 1])
-        entity_number += 1
-
-        entities.append({
-            "entity_number": entity_number,
-            "name": "splitter",
-            "position": {"x": end_x, "y": end_y}
-        })
-        self.grid.occupy(end_x, end_y, "splitter", [1, 1])
-        entity_number += 1
 
         return entity_number

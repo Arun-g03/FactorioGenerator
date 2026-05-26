@@ -1,6 +1,9 @@
-import pygame
 import logging
 from pathlib import Path
+
+import pygame
+
+from core.constants import CARDINAL_NAMES
 
 class SpriteLoader:
     """
@@ -29,8 +32,6 @@ class SpriteLoader:
         "south-to-west": 10,
         "west-to-south": 11,
     }
-
-    INSERTER_PLATFORM_DIRECTIONS = ("north", "east", "south", "west")
 
     def __init__(self, factorio_graphics_path=None):
         if factorio_graphics_path is None:
@@ -105,11 +106,11 @@ class SpriteLoader:
         try:
             sheet = self._load_image(platform_file)
             width, height = sheet.get_size()
-            frame_count = len(self.INSERTER_PLATFORM_DIRECTIONS)
+            frame_count = len(CARDINAL_NAMES)
 
             if width >= height * frame_count:
                 frame_width = width // frame_count
-                for index, direction in enumerate(self.INSERTER_PLATFORM_DIRECTIONS):
+                for index, direction in enumerate(CARDINAL_NAMES):
                     frame = pygame.Surface((frame_width, height), pygame.SRCALPHA)
                     frame.blit(sheet, (0, 0), (index * frame_width, 0, frame_width, height))
                     self.sprites[f"{entity_name}-platform-{direction}"] = self._apply_transparency(frame)

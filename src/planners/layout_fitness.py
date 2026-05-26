@@ -350,13 +350,15 @@ def evaluate_stage_layout(
                 )
             ingredient_index += 1
 
-    for resource, input_points in base_material_feeds.items():
-        estimated_belts += BASE_BUS_LENGTH
+    for bus_index, (resource, input_points) in enumerate(base_material_feeds.items()):
+        bus_y = BASE_BUS_Y + bus_index * 2
+        bus_x_start = BASE_BUS_X_START + (1 if bus_index == 0 else 0)
+        estimated_belts += BASE_BUS_LENGTH - (1 if bus_index == 0 else 0)
         for input_start in input_points:
             in_x, in_y = input_start
-            drop_x = max(BASE_BUS_X_START, in_x - 5)
+            drop_x = max(bus_x_start, in_x - 5)
             estimated_belts += _manhattan_path_length(
-                (drop_x, BASE_BUS_Y), (in_x - 1, in_y)
+                (drop_x, bus_y), (in_x - 1, in_y)
             )
 
     if grid is not None:

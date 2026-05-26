@@ -97,7 +97,7 @@ def run_generation_pipeline(
     ) = blueprint_manager.generate_blueprint(progress_callback=progress_callback)
 
     logging.info("[%s] Encoding blueprint string...", GenerationStage.ENCODE)
-    blueprint_string = encode_blueprint(blueprint)
+    blueprint_string = encode_blueprint(blueprint, recipes_data)
     logging.info("Blueprint string length: %s characters", len(blueprint_string))
 
     result = BlueprintGenerationResult.from_blueprint(
