@@ -17,6 +17,7 @@ from core.constants import (
     direction_for_inserter,
     inserter_direction_for_display,
     inserter_pickup_tile,
+    inserter_pickup_tile,
 )
 
 
@@ -56,9 +57,15 @@ class TestInserterDirections(unittest.TestCase):
         input_inserter = (machine_x - 1, lane_y)
         output_inserter = (machine_x + w, lane_y)
         input_drop = (machine_x, lane_y)
+        input_inserter = (machine_x - 1, lane_y)
+        output_inserter = (machine_x + w, lane_y)
+        input_drop = (machine_x, lane_y)
         output_drop = (machine_x + w + 1, lane_y)
         belt_pickup = (machine_x - 2, lane_y)
+        belt_pickup = (machine_x - 2, lane_y)
 
+        in_dir = direction_for_inserter(input_inserter, input_drop)
+        out_dir = direction_for_inserter(output_inserter, output_drop)
         in_dir = direction_for_inserter(input_inserter, input_drop)
         out_dir = direction_for_inserter(output_inserter, output_drop)
 

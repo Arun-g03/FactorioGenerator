@@ -16,3 +16,4 @@ class InserterPlacer:
         from core.constants import direction_for_inserter
 
         return direction_for_inserter((inserter_x, inserter_y), (drop_x, drop_y))
+        return direction_for_inserter((inserter_x, inserter_y), (drop_x, drop_y))
