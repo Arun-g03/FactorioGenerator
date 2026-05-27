@@ -177,6 +177,10 @@ class BlueprintRenderer:
             world_y = 0
         
         tile_screen_x, tile_screen_y = self.world_to_screen(world_x, world_y)
+        footprint_w, footprint_h = self._entity_tile_footprint(entity)
+        tile_px = max(1, int(self.tile_size * self.zoom))
+        area_w = footprint_w * tile_px
+        area_h = footprint_h * tile_px
         
         # Get sprite (inserters use base platform; direction shown via arrow overlay)
         is_inserter = "inserter" in entity_name
@@ -193,9 +197,11 @@ class BlueprintRenderer:
             else:
                 # Draw a colored rectangle
                 color = self._get_color_for_entity(entity_name)
-                scaled_size = int(self.tile_size * self.zoom)
-                pygame.draw.rect(self.screen, color, 
-                               (tile_screen_x, tile_screen_y, scaled_size, scaled_size))
+                pygame.draw.rect(
+                    self.screen,
+                    color,
+                    (tile_screen_x, tile_screen_y, area_w, area_h),
+                )
                 self.logger.debug(f"No sprite for {sprite_name}, using fallback")
                 if is_inserter:
                     self._draw_inserter_direction_arrow(
@@ -205,8 +211,10 @@ class BlueprintRenderer:
                     )
                 return
         
-        sprite = self._scale_sprite_to_tile(sprite)
-        blit_x, blit_y = self._center_sprite_on_tile(sprite, tile_screen_x, tile_screen_y)
+        sprite = self._scale_sprite_to_tile(sprite, area_w, area_h)
+        blit_x, blit_y = self._center_sprite_on_tile(
+            sprite, tile_screen_x, tile_screen_y, area_w, area_h
+        )
         self.screen.blit(sprite, (blit_x, blit_y))
 
         if is_inserter:
@@ -216,24 +224,34 @@ class BlueprintRenderer:
                 inserter_direction_for_display(direction),
             )
 
-    def _scale_sprite_to_tile(self, sprite):
-        """Scale a sprite to fit within one tile."""
-        tile = max(1, int(self.tile_size * self.zoom))
+    def _entity_tile_footprint(self, entity):
+        """Return tile width/height occupied by an entity on the grid."""
+        from core.blueprintEncoder import _entity_footprint
+
+        return _entity_footprint(entity, self._recipes_data)
+
+    def _scale_sprite_to_tile(self, sprite, area_w=None, area_h=None):
+        """Scale a sprite to fit within an entity footprint (defaults to 1x1 tile)."""
+        if area_w is None or area_h is None:
+            tile = max(1, int(self.tile_size * self.zoom))
+            area_w = area_h = tile
         sw, sh = sprite.get_width(), sprite.get_height()
         if sw <= 0 or sh <= 0:
             return sprite
-        scale = min(tile / sw, tile / sh)
+        scale = min(area_w / sw, area_h / sh)
         if abs(scale - 1.0) < 0.01:
             return sprite
         return pygame.transform.smoothscale(
             sprite, (max(1, int(sw * scale)), max(1, int(sh * scale)))
         )
 
-    def _center_sprite_on_tile(self, sprite, screen_x, screen_y):
-        """Offset blit position so the sprite is centered on its tile."""
-        tile = int(self.tile_size * self.zoom)
-        offset_x = (tile - sprite.get_width()) // 2
-        offset_y = (tile - sprite.get_height()) // 2
+    def _center_sprite_on_tile(self, sprite, screen_x, screen_y, area_w=None, area_h=None):
+        """Offset blit position so the sprite is centered on its footprint."""
+        if area_w is None or area_h is None:
+            tile = int(self.tile_size * self.zoom)
+            area_w = area_h = tile
+        offset_x = (area_w - sprite.get_width()) // 2
+        offset_y = (area_h - sprite.get_height()) // 2
         return screen_x + offset_x, screen_y + offset_y
 
     def _direction_to_arrow_vector(self, direction):

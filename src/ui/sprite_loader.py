@@ -18,6 +18,13 @@ class SpriteLoader:
         "express-transport-belt": (20, 16),
     }
 
+    # Entity animation sheets: (cell_width, cell_height, line_length); frame 0 = icon
+    ENTITY_SPRITE_SHEET_LAYOUT = {
+        "assembling-machine-1": (214, 226, 8),
+        "assembling-machine-2": (214, 218, 8),
+        "assembling-machine-3": (214, 237, 8),
+    }
+
     BELT_DIRECTION_ROWS = {
         "east": 0,
         "west": 1,
@@ -69,6 +76,14 @@ class SpriteLoader:
         sprite = pygame.Surface((cell_width, cell_height), pygame.SRCALPHA)
         sprite.blit(sheet_surface, (0, 0), (x, y, cell_width, cell_height))
         return self._apply_transparency(sprite)
+
+    def _extract_sheet_frame(self, sheet_surface, frame_index, cell_width, cell_height, line_length):
+        """Extract one frame from a Factorio animation sprite sheet."""
+        col = frame_index % line_length
+        row = frame_index // line_length
+        return self._extract_sprite_from_sheet(
+            sheet_surface, row, col, cell_width, cell_height
+        )
 
     def _detect_sheet_sprite_size(self, sheet, rows, cols):
         width, height = sheet.get_size()
@@ -178,8 +193,20 @@ class SpriteLoader:
             main_sprite = png_files[0]
 
         try:
-            sprite = self._load_image(main_sprite)
-            self.sprites[entity_name] = self._apply_transparency(sprite)
+            sheet = self._load_image(main_sprite)
+            layout = self.ENTITY_SPRITE_SHEET_LAYOUT.get(entity_name)
+            if layout:
+                cell_width, cell_height, line_length = layout
+                sprite = self._extract_sheet_frame(
+                    sheet, 0, cell_width, cell_height, line_length
+                )
+                self.logger.info(
+                    f"Loaded {entity_name} sprite sheet frame 0: "
+                    f"{cell_width}x{cell_height}px"
+                )
+            else:
+                sprite = self._apply_transparency(sheet)
+            self.sprites[entity_name] = sprite
             return True
         except Exception as e:
             self.logger.error(f"Failed to load sprite for {entity_name}: {e}")

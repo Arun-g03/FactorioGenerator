@@ -10,6 +10,62 @@ from core.constants import (
 )
 
 logger = logging.getLogger(__name__)
+OUTPUT_ANY_PRODUCT = "any"
+
+
+def _layout_produced_items(stage_machines) -> set[str]:
+    return set(stage_machines.keys())
+
+
+def terminal_products(stage_machines, nodes) -> set[str]:
+    """Items produced in the layout that no other placed stage consumes."""
+    produced = _layout_produced_items(stage_machines)
+    consumed_internally: set[str] = set()
+    for item in produced:
+        node = nodes.get(item)
+        if not node:
+            continue
+        recipe = getattr(node, "recipe", None) or {}
+        for dep in recipe.get("ingredients", {}).keys():
+            if dep in produced:
+                consumed_internally.add(dep)
+    return produced - consumed_internally
+
+
+def _chain_depth(item: str, nodes, produced: set[str], memo: dict[str, int]) -> int:
+    """Longest dependency path through layout-produced items ending at ``item``."""
+    if item in memo:
+        return memo[item]
+    node = nodes.get(item)
+    if not node:
+        memo[item] = 0
+        return 0
+    internal_deps = [d for d in node.dependencies if d in produced]
+    if not internal_deps:
+        memo[item] = 0
+        return 0
+    memo[item] = 1 + max(_chain_depth(dep, nodes, produced, memo) for dep in internal_deps)
+    return memo[item]
+
+
+def latest_chain_product(stage_machines, nodes) -> str | None:
+    """
+    End-of-chain product for an unspecified output sink.
+
+    Picks a terminal product (not consumed by another placed stage), preferring
+    the deepest item in the internal dependency graph.
+    """
+    terminals = terminal_products(stage_machines, nodes)
+    if not terminals:
+        return None
+    if len(terminals) == 1:
+        return next(iter(terminals))
+    produced = _layout_produced_items(stage_machines)
+    memo: dict[str, int] = {}
+    return max(
+        terminals,
+        key=lambda item: (_chain_depth(item, nodes, produced, memo), item),
+    )
 
 # Horizontal bus for raw resources (iron ore, copper ore, etc.)
 BASE_BUS_Y = 6
@@ -354,6 +410,8 @@ def connect_lane_to_lane(
     consumer_input,
     lane_offset=0,
     *,
+    source_knot=None,
+    dest_knot=None,
     placement_recorder=None,
     connection_detail: list[str] | None = None,
 ):
@@ -363,7 +421,13 @@ def connect_lane_to_lane(
     producer_output: (x, y) of the eastmost output belt tile
     consumer_input: (x, y) tile where upstream belts meet the consumer input row
     lane_offset: vertical offset for parallel ingredient feeds
+    source_knot / dest_knot: optional (inserter_pos, drop_pos) rope endpoints
     """
+    from planners.machine_io import knot_belt_tile, place_inserter_knot
+
+    entity_number = place_inserter_knot(grid, entities, entity_number, source_knot)
+    entity_number = place_inserter_knot(grid, entities, entity_number, dest_knot)
+
     out_x, out_y = producer_output
     in_x, in_y = consumer_input
     target_y = in_y + lane_offset
@@ -374,9 +438,16 @@ def connect_lane_to_lane(
     else:
         end = (in_x - 1, target_y)
 
+    # If a destination knot exists, route up to the inserter's belt-side pickup tile.
+    # This avoids short belts when machine I/O side belts are not pre-placed.
+    dest_belt = knot_belt_tile(dest_knot)
+    if dest_belt is not None:
+        end = dest_belt
+
     if start == end:
         return entity_number
 
+    before = entity_number
     path = _route_belt_path(grid, start, end)
     entity_number = place_belt_path(grid, entities, entity_number, path)
 
@@ -384,12 +455,22 @@ def connect_lane_to_lane(
         merge_path = _route_belt_path(grid, (in_x - 1, target_y), (in_x, in_y))
         entity_number = place_belt_path(grid, entities, entity_number, merge_path)
 
-    logger.info(
-        "Connected belt from %s to %s (offset=%s)",
-        producer_output,
-        consumer_input,
-        lane_offset,
-    )
+    placed = entity_number - before
+    if placed > 0:
+        logger.info(
+            "Connected belt from %s to %s (offset=%s, segments=%s)",
+            producer_output,
+            consumer_input,
+            lane_offset,
+            placed,
+        )
+    else:
+        logger.warning(
+            "No new belt segments placed from %s to %s (offset=%s)",
+            producer_output,
+            consumer_input,
+            lane_offset,
+        )
     if placement_recorder is not None:
         detail = list(connection_detail or [])
         detail.append(f"Path tiles placed: {len(path)}")
@@ -420,6 +501,12 @@ def connect_stages(
     stage_machines: item -> list of (mx, my, w, h) for machines in that stage
     nodes: rate graph nodes keyed by item
     """
+    from planners.machine_io import (
+        ingredient_lane_offsets,
+        machine_input_inserter_knot,
+        recipe_input_lane_count,
+    )
+
     stage_lanes = {}
     for item, machines in stage_machines.items():
         recipe = getattr(nodes.get(item), "recipe", None)
@@ -462,6 +549,7 @@ def connect_stages(
                     "consumer_input_start": consumer_input_start,
                     "target_y": consumer_input_start[1],
                     "lane_offset": 0,
+                    "lane_idx": lane_idx,
                     "consumer_item": consumer_item,
                     "dep": dep,
                 }
@@ -484,6 +572,18 @@ def connect_stages(
 
         if not _needs_splitter_fanout(requests):
             for req in requests:
+                consumer_machine = stage_machines.get(req["consumer_item"], [None])[0]
+                dest_knot = None
+                if consumer_machine is not None:
+                    mx, my, w, h = consumer_machine
+                    lane_count = recipe_input_lane_count(
+                        getattr(nodes.get(req["consumer_item"]), "recipe", None)
+                    )
+                    offsets = ingredient_lane_offsets(lane_count)
+                    lane_offset = offsets[min(req.get("lane_idx", 0), len(offsets) - 1)]
+                    dest_knot = machine_input_inserter_knot(
+                        mx, my, w, h, FACTORIO_EAST, lane_offset=lane_offset
+                    )
                 title = f"Belt: {req['dep']} -> {req['consumer_item']}"
                 conn_detail = [
                     title,
@@ -496,6 +596,7 @@ def connect_stages(
                     producer_output_end,
                     req["consumer_input_start"],
                     lane_offset=req["lane_offset"],
+                    dest_knot=dest_knot,
                     placement_recorder=placement_recorder,
                     connection_detail=conn_detail,
                 )
@@ -520,6 +621,18 @@ def connect_stages(
                 producer_output_end,
             )
             for req in requests:
+                consumer_machine = stage_machines.get(req["consumer_item"], [None])[0]
+                dest_knot = None
+                if consumer_machine is not None:
+                    mx, my, w, h = consumer_machine
+                    lane_count = recipe_input_lane_count(
+                        getattr(nodes.get(req["consumer_item"]), "recipe", None)
+                    )
+                    offsets = ingredient_lane_offsets(lane_count)
+                    lane_offset = offsets[min(req.get("lane_idx", 0), len(offsets) - 1)]
+                    dest_knot = machine_input_inserter_knot(
+                        mx, my, w, h, FACTORIO_EAST, lane_offset=lane_offset
+                    )
                 entity_number = connect_lane_to_lane(
                     grid,
                     entities,
@@ -527,6 +640,7 @@ def connect_stages(
                     producer_output_end,
                     req["consumer_input_start"],
                     lane_offset=req["lane_offset"],
+                    dest_knot=dest_knot,
                     placement_recorder=placement_recorder,
                     connection_detail=[
                         f"Belt fallback: {req['dep']} -> {req['consumer_item']}",
@@ -575,6 +689,155 @@ def connect_stages(
     return entity_number
 
 
+def route_placed_layout(
+    grid,
+    entities,
+    entity_number,
+    stage_machines,
+    nodes,
+    *,
+    input_sources: dict[str, list[tuple[int, int]]] | None = None,
+    output_sinks: dict[str, list[tuple[int, int]]] | None = None,
+    placement_recorder=None,
+    place_machine_knots: bool = True,
+) -> tuple[int, dict[str, tuple[int, int]]]:
+    """
+    Route belts for a fixed machine layout.
+
+    Used by autonomous generation and assisted build: placement differs, routing
+    does not. ``stage_machines`` maps output item to (mx, my, w, h) tuples;
+    ``nodes`` is the rate graph keyed by item. Optional ``input_sources`` maps
+    base material to user-placed chest positions (assisted input cells).
+    Optional ``output_sinks`` maps product item to user-placed output chests.
+    """
+    if place_machine_knots:
+        from planners.machine_io import place_machine_endpoint_inserters
+
+        entity_number = place_machine_endpoint_inserters(
+            grid,
+            entities,
+            entity_number,
+            stage_machines,
+            nodes,
+        )
+    entity_number = connect_stages(
+        grid,
+        entities,
+        entity_number,
+        stage_machines,
+        nodes,
+        placement_recorder=placement_recorder,
+    )
+    entity_number, input_starts = connect_base_materials(
+        grid,
+        entities,
+        entity_number,
+        stage_machines,
+        nodes,
+        input_sources=input_sources,
+        placement_recorder=placement_recorder,
+    )
+    entity_number = connect_output_sinks(
+        grid,
+        entities,
+        entity_number,
+        stage_machines,
+        nodes,
+        output_sinks=output_sinks,
+        placement_recorder=placement_recorder,
+    )
+    return entity_number, input_starts
+
+
+def connect_output_sinks(
+    grid,
+    entities,
+    entity_number,
+    stage_machines,
+    nodes,
+    *,
+    output_sinks: dict[str, list[tuple[int, int]]] | None = None,
+    placement_recorder=None,
+):
+    """
+    Route belts from producer output lanes to user-placed output chests.
+
+    Each sink is a (chest_x, chest_y) tile; belts approach from the west
+    (east-flow layouts) and terminate at (chest_x - 1, chest_y).
+    """
+    output_sinks = output_sinks or {}
+    if not output_sinks:
+        return entity_number
+
+    for product in sorted(output_sinks.keys()):
+        if product == OUTPUT_ANY_PRODUCT:
+            latest = latest_chain_product(stage_machines, nodes)
+            if not latest:
+                logger.warning("Output sink 'any' but no producers in layout")
+                continue
+            producer_items = [latest]
+            route_label = latest
+        elif product in stage_machines:
+            producer_items = [product]
+            route_label = product
+        else:
+            logger.warning(
+                "Output sink for %s but no producer in layout", product
+            )
+            continue
+
+        for producer_item in producer_items:
+            node = nodes.get(producer_item)
+            recipe = getattr(node, "recipe", None)
+            producer_outputs: list[tuple[int, int]] = []
+            from planners.machine_io import recipe_input_lane_count
+
+            lane_count = recipe_input_lane_count(recipe)
+            for mx, my, w, h in stage_machines.get(producer_item, []):
+                lanes = machine_io_lanes(mx, my, w, h, input_lane_count=lane_count)
+                producer_outputs.append(lanes.get("output_start", lanes["output_end"]))
+            if not producer_outputs:
+                continue
+            for chest_x, chest_y in output_sinks[product]:
+                from planners.machine_io import belt_to_chest_knot, chest_belt_sink_connect
+
+                sink_connect = chest_belt_sink_connect(chest_x, chest_y)
+                for producer_output in producer_outputs:
+                    entity_number = connect_lane_to_lane(
+                        grid,
+                        entities,
+                        entity_number,
+                        producer_output,
+                        sink_connect,
+                        dest_knot=belt_to_chest_knot(chest_x, chest_y),
+                    )
+                    logger.info(
+                        "Routed %s from %s to output chest at (%s, %s)",
+                        route_label,
+                        producer_output,
+                        chest_x,
+                        chest_y,
+                    )
+                    if placement_recorder is not None:
+                        sink_title = (
+                            f"Output sink: any -> {route_label}"
+                            if product == OUTPUT_ANY_PRODUCT
+                            else f"Output sink: {product}"
+                        )
+                        placement_recorder.record(
+                            "output_sink",
+                            sink_title,
+                            [
+                                f"From producer output {producer_output}",
+                                f"Chest at ({chest_x}, {chest_y})",
+                            ],
+                            entities,
+                            highlights=[producer_output, (chest_x, chest_y)],
+                        )
+
+    return entity_number
+
+
 def connect_base_materials(
     grid,
     entities,
@@ -582,81 +845,156 @@ def connect_base_materials(
     stage_machines,
     nodes,
     *,
+    input_sources: dict[str, list[tuple[int, int]]] | None = None,
     placement_recorder=None,
 ):
     """
-    Place a top resource bus per base material and route into stage inputs.
+    Route base materials from input chests directly to machine input lanes.
 
-    Each starting item (iron ore, copper ore, etc.) gets its own wooden chest on
-    the first tile of its bus; belts run east from the next tile.
+    Uses the same ``connect_lane_to_lane`` pathing as stage-to-stage links.
+    Requires a user-placed input cell per resource (``input_sources``); horizontal
+    top-of-map buses are disabled for now.
     """
-    base_demands = {}
+    from planners.machine_io import (
+        chest_belt_feed_start,
+        chest_to_belt_knot,
+        ingredient_lane_offsets,
+        machine_input_inserter_knot,
+        recipe_input_lane_count,
+    )
+
+    input_sources = input_sources or {}
+    base_demands: dict[str, list[dict]] = {}
     for item, node in nodes.items():
         if item not in stage_machines:
             continue
-        lanes = stage_lanes_from_machines(
-            stage_machines[item], recipe=getattr(node, "recipe", None)
-        )
-        if not lanes:
-            continue
-        input_starts = lanes.get("input_starts", [lanes["input_start"]])
         consumer_recipe = getattr(node, "recipe", None) or {}
         from planners.machine_io import ingredient_lane_index
 
-        for dep in node.dependencies:
-            if dep in BASE_MATERIALS:
+        for machine in stage_machines[item]:
+            mx, my, w, h = machine
+            lane_count = recipe_input_lane_count(consumer_recipe)
+            lanes = machine_io_lanes(mx, my, w, h, input_lane_count=lane_count)
+            input_connects = lanes.get(
+                "input_connects",
+                lanes.get("input_starts", [lanes["input_start"]]),
+            )
+            offsets = ingredient_lane_offsets(lane_count)
+
+            for dep in node.dependencies:
+                if dep not in BASE_MATERIALS:
+                    continue
                 lane_idx = ingredient_lane_index(consumer_recipe, dep)
-                anchor = input_starts[min(lane_idx, len(input_starts) - 1)]
-                base_demands.setdefault(dep, []).append(anchor)
+                anchor = input_connects[min(lane_idx, len(input_connects) - 1)]
+                lane_offset = offsets[min(lane_idx, len(offsets) - 1)]
+                base_demands.setdefault(dep, []).append(
+                    {
+                        "anchor": anchor,
+                        "machine": machine,
+                        "lane_offset": lane_offset,
+                    }
+                )
 
     if not base_demands:
         return entity_number, {}
 
-    input_starts: dict[str, tuple[int, int]] = {}
-    bus_index = 0
+    blueprint_inputs: dict[str, tuple[int, int]] = {}
 
     for resource in sorted(base_demands.keys()):
-        input_points = base_demands[resource]
-        bus_y = BASE_BUS_Y + bus_index * 2
-        chest_x = BASE_BUS_X_START
-        bus_x_start = BASE_BUS_X_START + 1
-
-        entity_number = _place_storage_chest(
-            grid, entities, entity_number, chest_x, bus_y
-        )
-        input_starts[resource] = (chest_x, bus_y)
-        logger.info(
-            "Input start chest for %s at (%s, %s)",
-            resource,
-            chest_x,
-            bus_y,
-        )
-
-        for belt_x in range(bus_x_start, BASE_BUS_X_START + BASE_BUS_LENGTH):
-            entity_number = _place_belt(
-                grid, entities, entity_number, belt_x, bus_y, FACTORIO_EAST
+        demand_points = base_demands[resource]
+        input_points = [d["anchor"] for d in demand_points]
+        sources = input_sources.get(resource, [])
+        if not sources:
+            logger.info(
+                "No input cell for %s; place an input cell to route this resource",
+                resource,
             )
+            continue
 
-        for input_start in input_points:
-            in_x, in_y = input_start
-            drop_x = max(bus_x_start, in_x - 5)
-            path = _manhattan_path((drop_x, bus_y), (in_x - 1, in_y))
-            entity_number = place_belt_path(grid, entities, entity_number, path)
-            logger.info("Routed base material %s bus to %s", resource, input_start)
+        # Many-to-many: when there are multiple input cells for a resource, assign
+        # each consumer lane to the nearest source and route those groups.
+        # This prevents one arbitrary source from trying (and often failing) to
+        # reach the entire layout.
+        def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        # Keep legacy return shape (resource -> one representative chest).
+        chest_x0, chest_y0 = sources[0]
+        blueprint_inputs[resource] = (chest_x0, chest_y0)
+
+        # Group consumer inputs by chosen source chest.
+        consumers_by_source: dict[tuple[int, int], list[tuple[int, int]]] = {
+            src: [] for src in sources
+        }
+        for demand in demand_points:
+            consumer_input = demand["anchor"]
+            best_src = min(
+                sources,
+                key=lambda src: _manhattan(
+                    chest_belt_feed_start(src[0], src[1]), consumer_input
+                ),
+            )
+            consumers_by_source[best_src].append(demand)
+
+        used_sources = [(sx, sy) for (sx, sy), pts in consumers_by_source.items() if pts]
+        logger.info(
+            "Routing %s from %s input cell(s) to %s machine input(s)",
+            resource,
+            len(used_sources),
+            len(input_points),
+        )
+
+        for chest_x, chest_y in used_sources:
+            feed_start = chest_belt_feed_start(chest_x, chest_y)
+            chest_knot = chest_to_belt_knot(chest_x, chest_y)
+            grouped = consumers_by_source[(chest_x, chest_y)]
+            logger.info(
+                "Routing %s from input at (%s, %s) to %s machine input(s)",
+                resource,
+                chest_x,
+                chest_y,
+                len(grouped),
+            )
+            for demand in grouped:
+                consumer_input = demand["anchor"]
+                dest_knot = None
+                if demand.get("machine") is not None:
+                    mx, my, w, h = demand["machine"]
+                    dest_knot = machine_input_inserter_knot(
+                        mx,
+                        my,
+                        w,
+                        h,
+                        FACTORIO_EAST,
+                        lane_offset=demand.get("lane_offset", 0),
+                    )
+                entity_number = connect_lane_to_lane(
+                    grid,
+                    entities,
+                    entity_number,
+                    feed_start,
+                    consumer_input,
+                    source_knot=chest_knot,
+                    dest_knot=dest_knot,
+                )
+                logger.info(
+                    "Routed %s from %s to %s",
+                    resource,
+                    feed_start,
+                    consumer_input,
+                )
 
         if placement_recorder is not None:
+            all_sources = list(sources)
             placement_recorder.record(
-                "base_bus",
-                f"Base material bus: {resource}",
+                "base_feed",
+                f"Base material feed: {resource}",
                 [
-                    f"Chest at ({chest_x}, {bus_y})",
-                    f"Feeds {len(input_points)} stage input(s)",
-                    f"Bus runs east from x={bus_x_start}",
+                    f"Input cells: {', '.join(f'({sx}, {sy})' for sx, sy in all_sources)}",
+                    f"Direct routes to {len(input_points)} machine input(s)",
                 ],
                 entities,
-                highlights=[(chest_x, bus_y)] + list(input_points),
+                highlights=all_sources + list(input_points),
             )
 
-        bus_index += 1
-
-    return entity_number, input_starts
+    return entity_number, blueprint_inputs

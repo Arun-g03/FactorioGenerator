@@ -23,11 +23,10 @@ class Pathfinder:
         x, y = position
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             neighbor = (x + dx, y + dy)
-            # Check bounds
-            if 0 <= neighbor[0] < self.grid.width and 0 <= neighbor[1] < self.grid.height:
-                # Check if not occupied
-                if not self.grid.is_occupied(neighbor[0], neighbor[1]):
-                    neighbors.append(neighbor)
+            # Build space is intentionally unbounded in assisted routing; treat the
+            # grid as sparse/infinite and only block occupied cells.
+            if not self.grid.is_occupied(neighbor[0], neighbor[1]):
+                neighbors.append(neighbor)
         return neighbors
 
     def _is_belt_tile(self, x, y) -> bool:

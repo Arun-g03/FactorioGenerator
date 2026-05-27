@@ -33,7 +33,7 @@ class TestAssistedRouting(unittest.TestCase):
         self.assertIsNotNone(furnace.lanes)
         belts = [e for e in state.entities if e.get("name") == "transport-belt"]
         inserters = [e for e in state.entities if "inserter" in e.get("name", "")]
-        self.assertGreater(len(belts), 0)
+        self.assertEqual(len(belts), 0)
         self.assertGreater(len(inserters), 0)
 
     def test_connect_furnace_to_assembler(self):
@@ -52,6 +52,8 @@ class TestAssistedRouting(unittest.TestCase):
             if e.get("name") == "transport-belt"
         }
         self.assertGreater(len(belt_tiles), 5)
+        inserters = [e for e in state.entities if "inserter" in e.get("name", "")]
+        self.assertGreaterEqual(len(inserters), 2)
 
     def test_full_reroute_after_recipe_change(self):
         state = self._state()
@@ -86,6 +88,25 @@ class TestAssistedRouting(unittest.TestCase):
             if e["position"]["y"] == 20 and e["position"]["x"] >= 11
         ]
         self.assertGreater(len(chest_belts), 0)
+        inserters = [e for e in state.entities if "inserter" in e.get("name", "")]
+        self.assertGreater(len(inserters), 0)
+
+    def test_multiple_input_cells_feed_nearest_consumers(self):
+        state = self._state()
+        top = state.place_input_cell(10, 20)
+        bottom = state.place_input_cell(10, 40)
+        state.assign_input_resources_bulk([top.id, bottom.id], "iron-ore")
+
+        f1 = state.place_machine("stone-furnace", 50, 20, (2, 2))
+        f2 = state.place_machine("stone-furnace", 50, 40, (2, 2))
+        state.assign_recipes_bulk([f1.id, f2.id], "iron-plate")
+
+        belts = [e for e in state.entities if e.get("name") == "transport-belt"]
+        belt_tiles = {(int(e["position"]["x"]), int(e["position"]["y"])) for e in belts}
+
+        # We should see feed belts extending east from both input-cell rows.
+        self.assertTrue(any(x >= 11 and y == 20 for x, y in belt_tiles))
+        self.assertTrue(any(x >= 11 and y == 40 for x, y in belt_tiles))
 
     def test_assign_recipes_bulk(self):
         state = self._state()
@@ -106,6 +127,48 @@ class TestAssistedRouting(unittest.TestCase):
         state.remove_machine(a.id)
         belts_after = sum(1 for e in state.entities if e.get("name") == "transport-belt")
         self.assertLess(belts_after, belts_before)
+
+    def test_output_cell_routes_to_placed_chest(self):
+        state = self._state()
+        furnace = state.place_machine("stone-furnace", 10, 20, (2, 2))
+        state.assign_recipe(furnace.id, "iron-plate")
+        cell = state.place_output_cell(55, 20)
+        state.assign_output_products_bulk([cell.id], "iron-plate")
+        belts = [
+            e for e in state.entities if e.get("name") == "transport-belt"
+        ]
+        self.assertGreater(len(belts), 0)
+        west_of_chest = [
+            (int(e["position"]["x"]), int(e["position"]["y"]))
+            for e in belts
+            if e["position"]["y"] == 20 and e["position"]["x"] < 55
+        ]
+        self.assertGreater(len(west_of_chest), 0)
+
+    def test_place_output_cell_sets_flag(self):
+        state = self._state()
+        cell = state.place_output_cell(30, 30)
+        self.assertIsNotNone(cell)
+        self.assertTrue(cell.is_output_cell)
+        self.assertFalse(cell.is_input_cell)
+
+    def test_output_cell_any_routes_latest_in_chain(self):
+        state = self._state()
+        furnace = state.place_machine("stone-furnace", 5, 10, (2, 2))
+        assembler = state.place_machine("assembling-machine-1", 40, 10, (3, 3))
+        state.assign_recipe(furnace.id, "iron-plate")
+        state.assign_recipe(assembler.id, "iron-gear-wheel")
+        cell = state.place_output_cell(70, 10)
+        state.assign_output_products_bulk([cell.id], "any")
+        self.assertEqual(cell.output_product, "any")
+        belts = [e for e in state.entities if e.get("name") == "transport-belt"]
+        self.assertGreater(len(belts), 0)
+        west_of_chest = [
+            (int(e["position"]["x"]), int(e["position"]["y"]))
+            for e in belts
+            if e["position"]["y"] == 10 and e["position"]["x"] < 70
+        ]
+        self.assertGreater(len(west_of_chest), 0)
 
 
 if __name__ == "__main__":

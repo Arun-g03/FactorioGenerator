@@ -10,6 +10,7 @@ from core.constants import (
     INGREDIENT_LANE_SPACING,
     direction_for_flow,
     direction_for_inserter,
+    inserter_pickup_tile,
 )
 
 BELT_COUNT = 3
@@ -253,6 +254,165 @@ def machine_row_step(flow_direction, stride, index):
     if flow_direction in (FACTORIO_EAST, FACTORIO_WEST):
         return stride * index, 0
     return 0, stride * index
+
+
+InserterKnot = tuple[tuple[int, int], tuple[int, int]]
+
+
+def machine_input_inserter_knot(
+    machine_x: int,
+    machine_y: int,
+    width: int,
+    height: int,
+    flow_direction: int = FACTORIO_EAST,
+    *,
+    lane_offset: int = 0,
+) -> InserterKnot:
+    """Rope endpoint: belt -> machine (pickup belt, drop into machine)."""
+    _input_tiles, inserter_pos, drop_pos, _ = _input_lane_geometry(
+        machine_x, machine_y, width, height, flow_direction, lane_offset
+    )
+    return inserter_pos, drop_pos
+
+
+def machine_output_inserter_knot(
+    machine_x: int,
+    machine_y: int,
+    width: int,
+    height: int,
+    flow_direction: int = FACTORIO_EAST,
+) -> InserterKnot:
+    """Rope endpoint: machine -> belt (pickup machine, drop onto belt)."""
+    _output_tiles, inserter_pos, drop_pos, _ = _output_lane_geometry(
+        machine_x, machine_y, width, height, flow_direction
+    )
+    return inserter_pos, drop_pos
+
+
+def chest_to_belt_knot(
+    chest_x: int,
+    chest_y: int,
+    flow_direction: int = FACTORIO_EAST,
+) -> InserterKnot:
+    """Rope endpoint: input chest -> belt (east-flow layouts)."""
+    if flow_direction == FACTORIO_EAST:
+        return (chest_x + 1, chest_y), (chest_x + 2, chest_y)
+    if flow_direction == FACTORIO_WEST:
+        return (chest_x - 1, chest_y), (chest_x - 2, chest_y)
+    if flow_direction == FACTORIO_SOUTH:
+        return (chest_x, chest_y + 1), (chest_x, chest_y + 2)
+    return (chest_x, chest_y - 1), (chest_x, chest_y - 2)
+
+
+def belt_to_chest_knot(
+    chest_x: int,
+    chest_y: int,
+    flow_direction: int = FACTORIO_EAST,
+) -> InserterKnot:
+    """Rope endpoint: belt -> output chest (east-flow layouts)."""
+    if flow_direction == FACTORIO_EAST:
+        return (chest_x - 1, chest_y), (chest_x, chest_y)
+    if flow_direction == FACTORIO_WEST:
+        return (chest_x + 1, chest_y), (chest_x, chest_y)
+    if flow_direction == FACTORIO_SOUTH:
+        return (chest_x, chest_y - 1), (chest_x, chest_y)
+    return (chest_x, chest_y + 1), (chest_x, chest_y)
+
+
+def chest_belt_feed_start(
+    chest_x: int,
+    chest_y: int,
+    flow_direction: int = FACTORIO_EAST,
+) -> tuple[int, int]:
+    """First belt tile east of an input chest inserter knot."""
+    _pos, drop = chest_to_belt_knot(chest_x, chest_y, flow_direction)
+    return drop
+
+
+def chest_belt_sink_connect(
+    chest_x: int,
+    chest_y: int,
+    flow_direction: int = FACTORIO_EAST,
+) -> tuple[int, int]:
+    """Belt tile that feeds the inserter in front of an output chest."""
+    pos, _drop = belt_to_chest_knot(chest_x, chest_y, flow_direction)
+    if flow_direction == FACTORIO_EAST:
+        return (pos[0] - 1, pos[1])
+    if flow_direction == FACTORIO_WEST:
+        return (pos[0] + 1, pos[1])
+    if flow_direction == FACTORIO_SOUTH:
+        return (pos[0], pos[1] - 1)
+    return (pos[0], pos[1] + 1)
+
+
+def place_inserter_knot(
+    grid,
+    entities,
+    entity_number: int,
+    knot: InserterKnot | None,
+    *,
+    name: str = "inserter",
+) -> int:
+    """Place one inserter for a connection endpoint if the tile is free."""
+    if not knot:
+        return entity_number
+    pos, drop = knot
+    x, y = pos
+    if grid.is_occupied(x, y):
+        occupant = grid.occupied.get((x, y), "")
+        if "inserter" in occupant:
+            return entity_number
+        return entity_number
+
+    entities.append({
+        "entity_number": entity_number,
+        "name": name,
+        "position": {"x": x, "y": y},
+        "direction": direction_for_inserter(pos, drop),
+    })
+    grid.occupy(x, y, name, [1, 1])
+    return entity_number + 1
+
+
+def knot_belt_tile(knot: InserterKnot | None) -> tuple[int, int] | None:
+    """Return the belt-side tile that should touch this inserter knot."""
+    if not knot:
+        return None
+    pos, drop = knot
+    direction = direction_for_inserter(pos, drop)
+    return inserter_pickup_tile(pos, direction)
+
+
+def place_machine_endpoint_inserters(
+    grid,
+    entities,
+    entity_number: int,
+    stage_machines: dict[str, list[tuple[int, int, int, int]]],
+    nodes,
+    *,
+    flow_direction: int = FACTORIO_EAST,
+) -> int:
+    """
+    Place inserter knots on every machine before belt routing.
+
+    Each machine gets one output inserter and one input inserter per recipe
+    ingredient lane — the "knots" at machine ends of belt ropes.
+    """
+    for item, machines in stage_machines.items():
+        node = nodes.get(item)
+        recipe = getattr(node, "recipe", None)
+        lane_count = recipe_input_lane_count(recipe)
+        for mx, my, w, h in machines:
+            for lane_offset in ingredient_lane_offsets(lane_count):
+                knot = machine_input_inserter_knot(
+                    mx, my, w, h, flow_direction, lane_offset=lane_offset
+                )
+                entity_number = place_inserter_knot(
+                    grid, entities, entity_number, knot
+                )
+            knot = machine_output_inserter_knot(mx, my, w, h, flow_direction)
+            entity_number = place_inserter_knot(grid, entities, entity_number, knot)
+    return entity_number
 
 
 def place_machine_io_block(

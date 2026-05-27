@@ -310,25 +310,18 @@ class ProductionPlanner:
 
     def _connect_production_stages(self, entities, entity_number):
         """Route belts between stages and from base-material buses."""
-        from planners.stage_connector import connect_base_materials, connect_stages
+        from planners.stage_connector import route_placed_layout
 
         self.blueprint_input_starts = {}
         self.blueprint_start = None
-        entity_number = connect_stages(
+        entity_number, self.blueprint_input_starts = route_placed_layout(
             self.grid,
             entities,
             entity_number,
             self.stage_machines,
             self.nodes,
             placement_recorder=self.placement_recorder,
-        )
-        entity_number, self.blueprint_input_starts = connect_base_materials(
-            self.grid,
-            entities,
-            entity_number,
-            self.stage_machines,
-            self.nodes,
-            placement_recorder=self.placement_recorder,
+            place_machine_knots=False,
         )
         if self.blueprint_input_starts:
             self.blueprint_start = next(iter(self.blueprint_input_starts.values()))

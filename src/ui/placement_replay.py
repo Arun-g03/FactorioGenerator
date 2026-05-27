@@ -84,6 +84,7 @@ class PlacementReplayViewer:
         self.canvas_width = self.width - self.PANEL_WIDTH
 
         self.renderer = BlueprintRenderer(tile_size=PYGAME_TILE_SIZE)
+        self.renderer._recipes_data = recipes_data
         self.renderer.screen = self.screen
         self.renderer.width = self.canvas_width
         self.renderer.height = self.height

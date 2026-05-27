@@ -28,11 +28,14 @@ from core.constants import (
 from core.grid_env import Grid
 from planners.assisted_routing import (
     AssistedBuildState,
+    products_for_output_picker,
     recipes_for_entity,
 )
+from planners.stage_connector import OUTPUT_ANY_PRODUCT
 
 INPUT_CELL_PALETTE = "input-cell"
-PALETTE_ENTRIES = [INPUT_CELL_PALETTE] + [
+OUTPUT_CELL_PALETTE = "output-cell"
+PALETTE_ENTRIES = [INPUT_CELL_PALETTE, OUTPUT_CELL_PALETTE] + [
     "stone-furnace",
     "steel-furnace",
     "electric-furnace",
@@ -45,8 +48,66 @@ from blueprint_renderer import BlueprintRenderer
 from screen_manager import ScreenManager
 from toolbar import Toolbar
 
-PALETTE_WIDTH = 160
+PALETTE_DEFAULT_WIDTH = 220
+PALETTE_MIN_WIDTH = 160
+PALETTE_MAX_WIDTH = 420
+PALETTE_RESIZE_HANDLE_WIDTH = 10
 DRAG_CLICK_THRESHOLD_PX = 5
+
+
+def _output_product_label(product: str | None) -> str:
+    if product == OUTPUT_ANY_PRODUCT:
+        return "Any (latest in chain)"
+    if not product:
+        return "output ?"
+    return product.replace("-", " ")
+
+
+PICKER_ROW_HEIGHT = 32
+PICKER_LIST_TOP_OFFSET = 100
+PICKER_LIST_BOTTOM_RESERVED = 72
+
+
+def _picker_list_layout(panel: pygame.Rect) -> tuple[int, int, int, int]:
+    list_top = panel.y + PICKER_LIST_TOP_OFFSET
+    list_bottom = panel.bottom - PICKER_LIST_BOTTOM_RESERVED
+    visible_rows = max(1, (list_bottom - list_top) // PICKER_ROW_HEIGHT)
+    return PICKER_ROW_HEIGHT, list_top, list_bottom, visible_rows
+
+
+def _picker_clamp_scroll(scroll: int, visible_rows: int, item_count: int) -> int:
+    return max(0, min(scroll, max(0, item_count - visible_rows)))
+
+
+def _picker_apply_wheel(
+    scroll: int, visible_rows: int, item_count: int, delta_y: int, step: int = 3
+) -> int:
+    max_scroll = max(0, item_count - visible_rows)
+    if delta_y > 0:
+        return max(0, scroll - step)
+    if delta_y < 0:
+        return min(max_scroll, scroll + step)
+    return scroll
+
+
+def _draw_picker_scrollbar(
+    screen,
+    panel: pygame.Rect,
+    list_top: int,
+    list_bottom: int,
+    scroll: int,
+    visible_rows: int,
+    item_count: int,
+) -> None:
+    if item_count <= visible_rows:
+        return
+    track_h = list_bottom - list_top
+    track = pygame.Rect(panel.right - 18, list_top, 8, track_h)
+    pygame.draw.rect(screen, (45, 50, 60), track, border_radius=4)
+    thumb_h = max(20, int(track_h * visible_rows / item_count))
+    max_scroll = max(1, item_count - visible_rows)
+    thumb_y = list_top + int((track_h - thumb_h) * scroll / max_scroll)
+    pygame.draw.rect(screen, (120, 130, 150), pygame.Rect(track.x, thumb_y, track.width, thumb_h), border_radius=4)
 
 
 class RecipePickerModal:
@@ -86,8 +147,18 @@ class RecipePickerModal:
         pw, ph = 420, min(520, height - 80)
         return pygame.Rect((width - pw) // 2, (height - ph) // 2, pw, ph)
 
-    def handle_key(self, event) -> str | None:
+    def _sync_list_scroll(self, width: int, height: int) -> tuple[list[str], int]:
+        panel = self.panel_rect(width, height)
+        _row_h, _list_top, _list_bottom, visible = _picker_list_layout(panel)
         items = self._filtered()
+        self.visible_rows = visible
+        self.scroll = _picker_clamp_scroll(self.scroll, visible, len(items))
+        if items and self.selected >= len(items):
+            self.selected = len(items) - 1
+        return items, visible
+
+    def handle_key(self, event, width: int, height: int) -> str | None:
+        items, visible = self._sync_list_scroll(width, height)
         if event.key == pygame.K_ESCAPE:
             return "close"
         if event.key == pygame.K_UP:
@@ -96,8 +167,8 @@ class RecipePickerModal:
                 self.scroll = self.selected
         elif event.key == pygame.K_DOWN:
             self.selected = min(len(items) - 1, self.selected + 1) if items else 0
-            if self.selected >= self.scroll + self.visible_rows:
-                self.scroll = self.selected - self.visible_rows + 1
+            if self.selected >= self.scroll + visible:
+                self.scroll = self.selected - visible + 1
         elif event.key == pygame.K_RETURN and items:
             return f"pick:{items[self.selected]}"
         elif event.unicode and event.unicode.isprintable():
@@ -107,16 +178,20 @@ class RecipePickerModal:
         elif event.key == pygame.K_BACKSPACE:
             self.filter_text = self.filter_text[:-1]
             self.selected = 0
+            self.scroll = 0
         return None
+
+    def handle_wheel(self, delta_y: int, width: int, height: int) -> None:
+        items, visible = self._sync_list_scroll(width, height)
+        self.scroll = _picker_apply_wheel(self.scroll, visible, len(items), delta_y)
 
     def handle_click(self, mouse_pos, width: int, height: int) -> str | None:
         panel = self.panel_rect(width, height)
         if not panel.collidepoint(mouse_pos):
             return "close"
-        items = self._filtered()
-        row_h = 32
-        list_top = panel.y + 100
-        for i, item in enumerate(items[self.scroll : self.scroll + self.visible_rows]):
+        items, visible = self._sync_list_scroll(width, height)
+        row_h, list_top, _list_bottom, _visible = _picker_list_layout(panel)
+        for i, item in enumerate(items[self.scroll : self.scroll + visible]):
             row_rect = pygame.Rect(panel.x + 16, list_top + i * row_h, panel.width - 32, row_h - 4)
             if row_rect.collidepoint(mouse_pos):
                 return f"pick:{item}"
@@ -158,9 +233,10 @@ class RecipePickerModal:
         screen.blit(small.render(filt, True, (150, 155, 170)), (panel.x + 16, panel.y + 68))
 
         items = self._filtered()
-        row_h = 32
-        list_top = panel.y + 100
-        for vis_i, item in enumerate(items[self.scroll : self.scroll + self.visible_rows]):
+        row_h, list_top, list_bottom, visible = _picker_list_layout(panel)
+        self.visible_rows = visible
+        self.scroll = _picker_clamp_scroll(self.scroll, visible, len(items))
+        for vis_i, item in enumerate(items[self.scroll : self.scroll + visible]):
             idx = self.scroll + vis_i
             row_rect = pygame.Rect(panel.x + 16, list_top + vis_i * row_h, panel.width - 32, row_h - 4)
             sel = idx == self.selected
@@ -168,12 +244,17 @@ class RecipePickerModal:
             pygame.draw.rect(screen, color, row_rect, border_radius=4)
             label = item.replace("-", " ").title()
             screen.blit(row_font.render(label, True, (240, 240, 245)), (row_rect.x + 8, row_rect.y + 6))
+        _draw_picker_scrollbar(screen, panel, list_top, list_bottom, self.scroll, visible, len(items))
 
         close_rect = pygame.Rect(panel.right - 100, panel.bottom - 44, 84, 36)
         pygame.draw.rect(screen, (90, 70, 70), close_rect, border_radius=5)
         close_surf = row_font.render("Close", True, (255, 255, 255))
         screen.blit(close_surf, close_surf.get_rect(center=close_rect.center))
-        hint = small.render("Enter=select  Esc=close  Type to filter", True, (130, 130, 140))
+        hint = small.render(
+            "Enter=select  Esc=close  Wheel=scroll  Type to filter",
+            True,
+            (130, 130, 140),
+        )
         screen.blit(hint, (panel.x + 16, panel.bottom - 28))
 
 
@@ -284,6 +365,141 @@ class ResourcePickerModal:
         screen.blit(hint, (panel.x + 16, panel.bottom - 28))
 
 
+class ProductPickerModal:
+    """Modal to assign a craftable product to output cell(s)."""
+
+    def __init__(self, products: list[str], selection_count: int = 1):
+        self.products = products
+        self.selection_count = selection_count
+        self.scroll = 0
+        self.selected = 0
+        self.visible_rows = 12
+        self.filter_text = ""
+
+    def _filtered(self) -> list[str]:
+        if not self.filter_text.strip():
+            return self.products
+        q = self.filter_text.strip().lower()
+        return [
+            p
+            for p in self.products
+            if q in _output_product_label(p).lower()
+        ]
+
+    def panel_rect(self, width: int, height: int) -> pygame.Rect:
+        pw, ph = 420, min(520, height - 80)
+        return pygame.Rect((width - pw) // 2, (height - ph) // 2, pw, ph)
+
+    def _sync_list_scroll(self, width: int, height: int) -> tuple[list[str], int]:
+        panel = self.panel_rect(width, height)
+        _row_h, _list_top, _list_bottom, visible = _picker_list_layout(panel)
+        items = self._filtered()
+        self.visible_rows = visible
+        self.scroll = _picker_clamp_scroll(self.scroll, visible, len(items))
+        if items and self.selected >= len(items):
+            self.selected = len(items) - 1
+        return items, visible
+
+    def handle_key(self, event, width: int, height: int) -> str | None:
+        items, visible = self._sync_list_scroll(width, height)
+        if event.key == pygame.K_ESCAPE:
+            return "close"
+        if event.key == pygame.K_UP:
+            self.selected = max(0, self.selected - 1)
+            if self.selected < self.scroll:
+                self.scroll = self.selected
+        elif event.key == pygame.K_DOWN:
+            self.selected = min(len(items) - 1, self.selected + 1) if items else 0
+            if self.selected >= self.scroll + visible:
+                self.scroll = self.selected - visible + 1
+        elif event.key == pygame.K_RETURN and items:
+            return f"pick:{items[self.selected]}"
+        elif event.unicode and event.unicode.isprintable():
+            self.filter_text += event.unicode
+            self.selected = 0
+            self.scroll = 0
+        elif event.key == pygame.K_BACKSPACE:
+            self.filter_text = self.filter_text[:-1]
+            self.selected = 0
+            self.scroll = 0
+        return None
+
+    def handle_wheel(self, delta_y: int, width: int, height: int) -> None:
+        items, visible = self._sync_list_scroll(width, height)
+        self.scroll = _picker_apply_wheel(self.scroll, visible, len(items), delta_y)
+
+    def handle_click(self, mouse_pos, width: int, height: int) -> str | None:
+        panel = self.panel_rect(width, height)
+        if not panel.collidepoint(mouse_pos):
+            return "close"
+        items, visible = self._sync_list_scroll(width, height)
+        row_h, list_top, _list_bottom, _visible = _picker_list_layout(panel)
+        for i, item in enumerate(items[self.scroll : self.scroll + visible]):
+            row_rect = pygame.Rect(panel.x + 16, list_top + i * row_h, panel.width - 32, row_h - 4)
+            if row_rect.collidepoint(mouse_pos):
+                return f"pick:{item}"
+        close_rect = pygame.Rect(panel.right - 100, panel.bottom - 44, 84, 36)
+        if close_rect.collidepoint(mouse_pos):
+            return "close"
+        return None
+
+    def draw(self, screen, width: int, height: int) -> None:
+        overlay = pygame.Surface((width, height))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        screen.blit(overlay, (0, 0))
+
+        panel = self.panel_rect(width, height)
+        pygame.draw.rect(screen, (35, 38, 48), panel, border_radius=8)
+        pygame.draw.rect(screen, (90, 95, 110), panel, width=2, border_radius=8)
+
+        title_font = pygame.font.Font(None, 32)
+        row_font = pygame.font.Font(None, 26)
+        small = pygame.font.Font(None, 22)
+
+        title = (
+            f"Output product ({self.selection_count} cell(s))"
+            if self.selection_count > 1
+            else "Output product"
+        )
+        screen.blit(title_font.render(title, True, (255, 210, 80)), (panel.x + 16, panel.y + 12))
+        screen.blit(
+            small.render(
+                "Any = route end-of-chain product to chest",
+                True,
+                (180, 180, 190),
+            ),
+            (panel.x + 16, panel.y + 42),
+        )
+        filt = f"Filter: {self.filter_text or '(type to search)'}"
+        screen.blit(small.render(filt, True, (150, 155, 170)), (panel.x + 16, panel.y + 68))
+
+        items = self._filtered()
+        row_h, list_top, list_bottom, visible = _picker_list_layout(panel)
+        self.visible_rows = visible
+        self.scroll = _picker_clamp_scroll(self.scroll, visible, len(items))
+        for vis_i, item in enumerate(items[self.scroll : self.scroll + visible]):
+            idx = self.scroll + vis_i
+            row_rect = pygame.Rect(panel.x + 16, list_top + vis_i * row_h, panel.width - 32, row_h - 4)
+            sel = idx == self.selected
+            color = (120, 80, 140) if sel else (50, 55, 65)
+            pygame.draw.rect(screen, color, row_rect, border_radius=4)
+            label = _output_product_label(item).title()
+            screen.blit(row_font.render(label, True, (240, 240, 245)), (row_rect.x + 8, row_rect.y + 6))
+        _draw_picker_scrollbar(screen, panel, list_top, list_bottom, self.scroll, visible, len(items))
+
+        close_rect = pygame.Rect(panel.right - 100, panel.bottom - 44, 84, 36)
+        pygame.draw.rect(screen, (90, 70, 70), close_rect, border_radius=5)
+        close_surf = row_font.render("Close", True, (255, 255, 255))
+        screen.blit(close_surf, close_surf.get_rect(center=close_rect.center))
+        hint = small.render(
+            "Enter=select  Esc=close  Wheel=scroll  Type to filter",
+            True,
+            (130, 130, 140),
+        )
+        screen.blit(hint, (panel.x + 16, panel.bottom - 28))
+
+
 class AssistedBuildWorkspace:
     """Session controller for Assisted Build mode."""
 
@@ -293,17 +509,20 @@ class AssistedBuildWorkspace:
         self.logger = logging.getLogger(__name__)
         self.screen_manager = ScreenManager()
         self.renderer = BlueprintRenderer(tile_size=PYGAME_TILE_SIZE)
+        self.renderer._recipes_data = recipes_data
         self.state = AssistedBuildState(grid=Grid(), recipes_data=recipes_data)
 
         self.width = PYGAME_WINDOW_WIDTH
         self.height = PYGAME_WINDOW_HEIGHT
+        self.palette_width = PALETTE_DEFAULT_WIDTH
         self.placement_building: str | None = None
         self.hover_tile: tuple[int, int] | None = None
         self.recipe_modal: RecipePickerModal | None = None
         self.resource_modal: ResourcePickerModal | None = None
+        self.product_modal: ProductPickerModal | None = None
         self.pending_machine_ids: list[str] | None = None
         self.selected_machine_ids: set[str] = set()
-        self.drag_mode: str | None = None  # "pan" | "place" | "box_select"
+        self.drag_mode: str | None = None  # "pan" | "place" | "box_select" | "palette_resize"
         self.drag_start_screen: tuple[int, int] | None = None
         self.box_select_start_tile: tuple[int, int] | None = None
         self.box_select_end_tile: tuple[int, int] | None = None
@@ -313,7 +532,63 @@ class AssistedBuildWorkspace:
         self.pause_selected_button = 0
 
     def _canvas_left(self) -> int:
-        return PALETTE_WIDTH
+        return int(self.palette_width)
+
+    def _click_on_toolbar(self, pos: tuple[int, int]) -> bool:
+        if not self.renderer.toolbar:
+            return False
+        return pos[1] >= self.renderer.toolbar.y_position
+
+    def _click_on_palette(self, pos: tuple[int, int]) -> bool:
+        return (
+            pos[0] < self._canvas_left()
+            and pos[1] < self._canvas_bottom()
+            and not self._click_on_toolbar(pos)
+        )
+
+    def _palette_resize_hitbox(self) -> pygame.Rect:
+        x = self._canvas_left() - PALETTE_RESIZE_HANDLE_WIDTH // 2
+        return pygame.Rect(x, 0, PALETTE_RESIZE_HANDLE_WIDTH, self._canvas_bottom())
+
+    def _wrap_text_to_width(
+        self, text: str, font: pygame.font.Font, max_width: int
+    ) -> list[str]:
+        words = text.split()
+        if not words:
+            return [text]
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            if current and font.size(candidate)[0] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines or [text]
+
+    def _palette_entry_layout(
+        self, label_font: pygame.font.Font
+    ) -> list[tuple[str, pygame.Rect, list[str], str]]:
+        rows: list[tuple[str, pygame.Rect, list[str], str]] = []
+        y = 96
+        key_pad = 28
+        text_w = max(60, self._canvas_left() - 16 - 16 - key_pad)
+        for i, name in enumerate(PALETTE_ENTRIES):
+            if name == INPUT_CELL_PALETTE:
+                label = "Input Cell"
+            elif name == OUTPUT_CELL_PALETTE:
+                label = "Output Cell"
+            else:
+                label = name.replace("-", " ").title()
+            lines = self._wrap_text_to_width(label, label_font, text_w)
+            row_h = max(36, 10 + len(lines) * 18)
+            rect = pygame.Rect(8, y, self._canvas_left() - 16, row_h)
+            rows.append((name, rect, lines, str(i)))
+            y += row_h + 6
+        return rows
 
     def _canvas_bottom(self) -> int:
         if self.renderer.toolbar:
@@ -332,17 +607,24 @@ class AssistedBuildWorkspace:
         )
 
     def _building_size(self, name: str) -> tuple[int, int]:
-        if name == INPUT_CELL_PALETTE:
+        if name in (INPUT_CELL_PALETTE, OUTPUT_CELL_PALETTE):
             return (1, 1)
         info = self.buildings.get(name, {})
         size = info.get("size", [3, 3])
         return tuple(size)
 
     def _production_machines(self, machines: list) -> list:
-        return [m for m in machines if not m.is_input_cell]
+        return [
+            m
+            for m in machines
+            if not m.is_input_cell and not m.is_output_cell
+        ]
 
     def _input_cells(self, machines: list) -> list:
         return [m for m in machines if m.is_input_cell]
+
+    def _output_cells(self, machines: list) -> list:
+        return [m for m in machines if m.is_output_cell]
 
     def _selected_machines(self) -> list:
         return [m for m in self.state.machines if m.id in self.selected_machine_ids]
@@ -372,14 +654,27 @@ class AssistedBuildWorkspace:
             selection_count=len(machines),
         )
 
+    def _open_product_modal(self, machines: list) -> None:
+        if not machines:
+            return
+        self.pending_machine_ids = [m.id for m in machines]
+        self.product_modal = ProductPickerModal(
+            products_for_output_picker(self.recipes_data),
+            selection_count=len(machines),
+        )
+
     def _open_recipe_modal_for_selection(self) -> None:
         machines = self._selected_machines()
         if not machines:
             return
         prod = self._production_machines(machines)
         inputs = self._input_cells(machines)
-        if inputs and not prod:
+        outputs = self._output_cells(machines)
+        if inputs and not prod and not outputs:
             self._open_resource_modal(inputs)
+            return
+        if outputs and not prod and not inputs:
+            self._open_product_modal(outputs)
             return
         if not prod:
             return
@@ -405,6 +700,9 @@ class AssistedBuildWorkspace:
         if machine.is_input_cell:
             self._set_selection([machine])
             self._open_resource_modal([machine])
+        elif machine.is_output_cell:
+            self._set_selection([machine])
+            self._open_product_modal([machine])
         else:
             self._open_recipe_modal(machine)
 
@@ -430,6 +728,18 @@ class AssistedBuildWorkspace:
                 self.blueprint_string = self.state.encode_blueprint_string()
             self._clear_selection()
         self.resource_modal = None
+        self.pending_machine_ids = None
+
+    def _apply_product_pick(self, product: str) -> None:
+        if self.pending_machine_ids:
+            applied = self.state.assign_output_products_bulk(
+                self.pending_machine_ids, product
+            )
+            if applied:
+                self._sync_renderer_entities()
+                self.blueprint_string = self.state.encode_blueprint_string()
+            self._clear_selection()
+        self.product_modal = None
         self.pending_machine_ids = None
 
     def _delete_selection(self) -> None:
@@ -469,6 +779,12 @@ class AssistedBuildWorkspace:
             if machine:
                 self._sync_renderer_entities()
                 self._open_resource_modal([machine])
+            return
+        if self.placement_building == OUTPUT_CELL_PALETTE:
+            machine = self.state.place_output_cell(x, y)
+            if machine:
+                self._sync_renderer_entities()
+                self._open_product_modal([machine])
             return
         w, h = self._building_size(self.placement_building)
         machine = self.state.place_machine(self.placement_building, x, y, (w, h))
@@ -522,16 +838,20 @@ class AssistedBuildWorkspace:
 
     def _draw_palette(self) -> None:
         screen = self.renderer.screen
-        pygame.draw.rect(screen, (28, 30, 38), (0, 0, PALETTE_WIDTH, self._canvas_bottom()))
+        palette_w = self._canvas_left()
+        pygame.draw.rect(screen, (28, 30, 38), (0, 0, palette_w, self._canvas_bottom()))
         pygame.draw.line(
-            screen, (70, 75, 90), (PALETTE_WIDTH, 0), (PALETTE_WIDTH, self._canvas_bottom())
+            screen, (70, 75, 90), (palette_w, 0), (palette_w, self._canvas_bottom())
         )
         font = pygame.font.Font(None, 24)
+        label_font = pygame.font.Font(None, 22)
         small = pygame.font.Font(None, 20)
         title = font.render("Buildings", True, (255, 210, 80))
         screen.blit(title, (12, 12))
+        resize_hint = small.render("Drag edge to resize", True, (120, 125, 140))
+        screen.blit(resize_hint, (12, 34))
         mouse = pygame.mouse.get_pos()
-        none_rect = pygame.Rect(8, 40, PALETTE_WIDTH - 16, 32)
+        none_rect = pygame.Rect(8, 58, palette_w - 16, 32)
         none_active = self.placement_building is None
         none_hover = none_rect.collidepoint(mouse)
         none_color = (90, 70, 70) if none_active else (55, 58, 68)
@@ -540,29 +860,43 @@ class AssistedBuildWorkspace:
         pygame.draw.rect(screen, none_color, none_rect, border_radius=5)
         screen.blit(small.render("None (Q)", True, (255, 255, 255)), (none_rect.x + 8, none_rect.y + 8))
 
-        y = 80
-        for i, name in enumerate(PALETTE_ENTRIES):
-            rect = pygame.Rect(8, y, PALETTE_WIDTH - 16, 36)
+        for name, rect, lines, key_hint in self._palette_entry_layout(label_font):
             active = name == self.placement_building
             hover = rect.collidepoint(mouse)
             if name == INPUT_CELL_PALETTE:
                 base = (55, 100, 75)
                 active_color = (70, 140, 100)
+            elif name == OUTPUT_CELL_PALETTE:
+                base = (90, 55, 100)
+                active_color = (140, 70, 150)
             else:
                 base = (50, 55, 68)
                 active_color = (80, 120, 180)
             color = active_color if active else (60, 90, 150) if hover else base
             pygame.draw.rect(screen, color, rect, border_radius=5)
-            if name == INPUT_CELL_PALETTE:
-                label = "Input Cell"
-            else:
-                label = name.replace("-", " ").title()
-            if len(label) > 18:
-                label = label[:16] + "…"
-            key_hint = str(i)
-            screen.blit(font.render(label, True, (255, 255, 255)), (rect.x + 8, rect.y + 6))
-            screen.blit(small.render(key_hint, True, (180, 185, 200)), (rect.right - 22, rect.y + 12))
-            y += 42
+            y0 = rect.y + 5
+            for line in lines:
+                screen.blit(label_font.render(line, True, (255, 255, 255)), (rect.x + 8, y0))
+                y0 += 18
+            key_surface = small.render(key_hint, True, (180, 185, 200))
+            screen.blit(
+                key_surface,
+                (rect.right - 8 - key_surface.get_width(), rect.centery - key_surface.get_height() // 2),
+            )
+
+        handle = self._palette_resize_hitbox()
+        handle_color = (
+            (150, 155, 170)
+            if handle.collidepoint(mouse) or self.drag_mode == "palette_resize"
+            else (95, 100, 115)
+        )
+        pygame.draw.line(
+            screen,
+            handle_color,
+            (palette_w, 0),
+            (palette_w, self._canvas_bottom()),
+            2,
+        )
 
         hint_font = pygame.font.Font(None, 20)
         sel = len(self.selected_machine_ids)
@@ -624,6 +958,7 @@ class AssistedBuildWorkspace:
             or not self.hover_tile
             or self.recipe_modal
             or self.resource_modal
+            or self.product_modal
         ):
             return
         x, y = self.hover_tile
@@ -634,6 +969,9 @@ class AssistedBuildWorkspace:
         occupied = self.state.grid.is_occupied(x, y, w, h)
         if self.placement_building == INPUT_CELL_PALETTE:
             ok = (100, 200, 140, 100)
+            bad = (255, 80, 80, 100)
+        elif self.placement_building == OUTPUT_CELL_PALETTE:
+            ok = (200, 140, 220, 100)
             bad = (255, 80, 80, 100)
         else:
             ok = (80, 200, 120, 100)
@@ -651,6 +989,9 @@ class AssistedBuildWorkspace:
             if m.is_input_cell:
                 label = (m.input_resource or "input ?").replace("-", " ")
                 color = (255, 230, 120) if not m.input_resource else (140, 230, 180)
+            elif m.is_output_cell:
+                label = _output_product_label(m.output_product)
+                color = (255, 230, 120) if not m.output_product else (220, 160, 240)
             else:
                 label = (m.recipe_item or "?").replace("-", " ")
                 color = (255, 230, 120) if not m.recipe_item else (200, 220, 255)
@@ -660,7 +1001,12 @@ class AssistedBuildWorkspace:
             self.renderer.screen.blit(text, (sx + 4, sy - 16))
 
     def _draw_selection_status(self) -> None:
-        if not self.selected_machine_ids or self.recipe_modal or self.resource_modal:
+        if (
+            not self.selected_machine_ids
+            or self.recipe_modal
+            or self.resource_modal
+            or self.product_modal
+        ):
             return
         n = len(self.selected_machine_ids)
         font = pygame.font.Font(None, 24)
@@ -727,12 +1073,16 @@ class AssistedBuildWorkspace:
                 continue
 
             if self.recipe_modal and event.type == pygame.KEYDOWN:
-                action = self.recipe_modal.handle_key(event)
+                action = self.recipe_modal.handle_key(event, self.width, self.height)
                 if action == "close":
                     self.recipe_modal = None
                     self.pending_machine_ids = None
                 elif action and action.startswith("pick:"):
                     self._apply_recipe_pick(action.split(":", 1)[1])
+                continue
+
+            if self.recipe_modal and event.type == pygame.MOUSEWHEEL:
+                self.recipe_modal.handle_wheel(event.y, self.width, self.height)
                 continue
 
             if self.recipe_modal and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -742,6 +1092,28 @@ class AssistedBuildWorkspace:
                     self.pending_machine_ids = None
                 elif action and action.startswith("pick:"):
                     self._apply_recipe_pick(action.split(":", 1)[1])
+                continue
+
+            if self.product_modal and event.type == pygame.KEYDOWN:
+                action = self.product_modal.handle_key(event, self.width, self.height)
+                if action == "close":
+                    self.product_modal = None
+                    self.pending_machine_ids = None
+                elif action and action.startswith("pick:"):
+                    self._apply_product_pick(action.split(":", 1)[1])
+                continue
+
+            if self.product_modal and event.type == pygame.MOUSEWHEEL:
+                self.product_modal.handle_wheel(event.y, self.width, self.height)
+                continue
+
+            if self.product_modal and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                action = self.product_modal.handle_click(event.pos, self.width, self.height)
+                if action == "close":
+                    self.product_modal = None
+                    self.pending_machine_ids = None
+                elif action and action.startswith("pick:"):
+                    self._apply_product_pick(action.split(":", 1)[1])
                 continue
 
             if self.paused:
@@ -791,15 +1163,17 @@ class AssistedBuildWorkspace:
                     self.blueprint_string = self.state.encode_blueprint_string()
                 elif event.key == pygame.K_c:
                     self.renderer._center_camera_on_blueprint()
-                elif not self.recipe_modal and not self.resource_modal:
-                    if event.key == pygame.K_0:
-                        self._select_palette_building(INPUT_CELL_PALETTE)
-                    elif pygame.K_1 <= event.key <= pygame.K_9:
-                        idx = event.key - pygame.K_1
+                elif (
+                    not self.recipe_modal
+                    and not self.resource_modal
+                    and not self.product_modal
+                ):
+                    if pygame.K_0 <= event.key <= pygame.K_9:
+                        idx = event.key - pygame.K_0
                         if idx < len(PALETTE_ENTRIES):
                             self._select_palette_building(PALETTE_ENTRIES[idx])
 
-            if self.recipe_modal or self.resource_modal:
+            if self.recipe_modal or self.resource_modal or self.product_modal:
                 continue
 
             if event.type == pygame.MOUSEMOTION:
@@ -813,6 +1187,11 @@ class AssistedBuildWorkspace:
                     self.renderer.camera_x += dx - self.last_mouse_pos[0]
                     self.renderer.camera_y += dy - self.last_mouse_pos[1]
                     self.last_mouse_pos = event.pos
+                elif self.drag_mode == "palette_resize":
+                    self.palette_width = max(
+                        PALETTE_MIN_WIDTH,
+                        min(PALETTE_MAX_WIDTH, event.pos[0]),
+                    )
                 elif self.drag_mode == "box_select" and self.hover_tile:
                     self.box_select_end_tile = self.hover_tile
                 elif self.drag_mode == "place" and self.drag_start_screen:
@@ -826,23 +1205,25 @@ class AssistedBuildWorkspace:
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     pos = event.pos
-                    if pos[0] < PALETTE_WIDTH:
-                        none_rect = pygame.Rect(8, 40, PALETTE_WIDTH - 16, 32)
+                    if self._click_on_toolbar(pos) and self.renderer.toolbar:
+                        action = self.renderer.toolbar.handle_click(pos)
+                        if action:
+                            return action
+                        continue
+                    if self._click_on_palette(pos) and self._palette_resize_hitbox().collidepoint(pos):
+                        self.drag_mode = "palette_resize"
+                        continue
+                    if self._click_on_palette(pos):
+                        none_rect = pygame.Rect(8, 58, self._canvas_left() - 16, 32)
                         if none_rect.collidepoint(pos):
                             self._clear_placement_tool()
                         else:
-                            y = 80
-                            for name in PALETTE_ENTRIES:
-                                rect = pygame.Rect(8, y, PALETTE_WIDTH - 16, 36)
+                            label_font = pygame.font.Font(None, 22)
+                            for name, rect, _lines, _key_hint in self._palette_entry_layout(label_font):
                                 if rect.collidepoint(pos):
                                     self._select_palette_building(name)
                                     break
-                                y += 42
                         continue
-                    if self.renderer.toolbar:
-                        action = self.renderer.toolbar.handle_click(pos)
-                        if action:
-                            return self._toolbar_action(action)
                     if self._tile_on_canvas(pos):
                         self.drag_start_screen = pos
                         self.last_mouse_pos = pos
@@ -895,23 +1276,10 @@ class AssistedBuildWorkspace:
             not self.paused
             and not self.recipe_modal
             and not self.resource_modal
+            and not self.product_modal
             and self.drag_mode not in ("box_select",)
         )
         self.renderer.update_keyboard_pan(enabled=can_pan)
-
-    def _toolbar_action(self, action: str) -> str | None:
-        if action == "route":
-            self.state.full_reroute()
-            self._sync_renderer_entities()
-            self.blueprint_string = self.state.encode_blueprint_string()
-        elif action == "copy":
-            if self.blueprint_string and self.renderer.toolbar:
-                self.renderer.toolbar.copy_to_clipboard(self.blueprint_string)
-        elif action == "center":
-            self.renderer._center_camera_on_blueprint()
-        elif action == "pause":
-            self.paused = not self.paused
-        return None
 
     def _draw_frame(self) -> None:
         screen = self.renderer.screen
@@ -936,6 +1304,8 @@ class AssistedBuildWorkspace:
             self.renderer.toolbar.draw(screen)
         if self.resource_modal:
             self.resource_modal.draw(screen, self.width, self.height)
+        elif self.product_modal:
+            self.product_modal.draw(screen, self.width, self.height)
         elif self.recipe_modal:
             self.recipe_modal.draw(screen, self.width, self.height)
         if self.paused:
@@ -961,6 +1331,17 @@ class AssistedBuildWorkspace:
                 return "menu"
             if result == "exit":
                 return "exit"
+            if result == "route":
+                self.state.full_reroute()
+                self._sync_renderer_entities()
+                self.blueprint_string = self.state.encode_blueprint_string()
+            elif result == "copy":
+                if self.blueprint_string and self.renderer.toolbar:
+                    self.renderer.toolbar.copy_to_clipboard(self.blueprint_string)
+            elif result == "center":
+                self.renderer._center_camera_on_blueprint()
+            elif result == "pause":
+                self.paused = not self.paused
             self._update_keyboard_pan()
             self._draw_frame()
             self.screen_manager.flip()

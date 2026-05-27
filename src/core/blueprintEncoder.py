@@ -30,6 +30,10 @@ _DEFAULT_SIZES: dict[str, tuple[int, int]] = {
 
 def _entity_footprint(entity: dict, recipes_data: dict | None) -> tuple[int, int]:
     """Tile width/height for an entity (planner uses top-left grid coords)."""
+    size = entity.get("size")
+    if size and len(size) >= 2:
+        return int(size[0]), int(size[1])
+
     name = entity.get("name", "")
     if "assembling-machine" in name:
         return 3, 3
