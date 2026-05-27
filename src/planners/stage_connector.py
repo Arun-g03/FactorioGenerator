@@ -402,6 +402,55 @@ def _needs_splitter_fanout(requests):
     return len(targets) >= 2
 
 
+def _east_splitter_output_lanes(splitter_x: int, splitter_y: int) -> tuple[tuple[int, int], tuple[int, int]]:
+    """North and south belt tiles immediately east of an east-facing splitter."""
+    exit_x = splitter_x + 2
+    return (exit_x, splitter_y - 1), (exit_x, splitter_y + 1)
+
+
+def _assign_splitter_branch_starts(
+    splitter_x: int,
+    splitter_y: int,
+    targets: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """
+    Map each routing target to a splitter output lane (north or south).
+
+    ``targets`` are path ends sorted by increasing y. Uses both splitter outputs
+    when there are two or more distinct consumers.
+    """
+    north_out, south_out = _east_splitter_output_lanes(splitter_x, splitter_y)
+    if len(targets) == 1:
+        _, ty = targets[0]
+        return [south_out if ty >= splitter_y else north_out]
+    if len(targets) == 2:
+        return [north_out, south_out]
+    # Three or more: alternate north/south (vanilla splitters only have two outputs).
+    starts = []
+    for index, (_, ty) in enumerate(targets):
+        if index == 0:
+            starts.append(north_out)
+        elif index == len(targets) - 1:
+            starts.append(south_out)
+        else:
+            starts.append(south_out if ty >= splitter_y else north_out)
+    return starts
+
+
+def _route_from_splitter_branches(
+    grid,
+    entities,
+    entity_number,
+    branch_starts: list[tuple[int, int]],
+    path_ends: list[tuple[int, int]],
+) -> int:
+    """Place belts from each splitter output lane to its consumer path end."""
+    for start, end in zip(branch_starts, path_ends):
+        path = _manhattan_path(start, end)
+        entity_number = place_belt_path(grid, entities, entity_number, path)
+    return entity_number
+
+
 def connect_lane_to_lane(
     grid,
     entities,
@@ -670,21 +719,30 @@ def connect_stages(
             producer_output_end,
         )
 
-        splitter_exit_x = out_x + 3
+        path_ends = []
         for req in requests:
+            in_x, _in_y = req["consumer_input_start"]
+            path_ends.append((in_x - 1, req["target_y"]))
+
+        sorted_pairs = sorted(
+            zip(requests, path_ends), key=lambda pair: pair[1][1]
+        )
+        sorted_ends = [end for _, end in sorted_pairs]
+        branch_starts = _assign_splitter_branch_starts(
+            splitter_x, splitter_y, sorted_ends
+        )
+        entity_number = _route_from_splitter_branches(
+            grid, entities, entity_number, branch_starts, sorted_ends
+        )
+
+        for req, end in sorted_pairs:
+            if req["lane_offset"] == 0:
+                continue
             in_x, in_y = req["consumer_input_start"]
-            target_y = req["target_y"]
-
-            path = _manhattan_path((splitter_exit_x, target_y), (in_x - 1, target_y))
-            entity_number = place_belt_path(grid, entities, entity_number, path)
-
-            if req["lane_offset"] != 0:
-                merge_path = _manhattan_path(
-                    (in_x - 1, target_y), (in_x - 1, in_y)
-                )
-                entity_number = place_belt_path(
-                    grid, entities, entity_number, merge_path
-                )
+            merge_path = _manhattan_path(end, (in_x, in_y))
+            entity_number = place_belt_path(
+                grid, entities, entity_number, merge_path
+            )
 
     return entity_number
 
@@ -838,6 +896,158 @@ def connect_output_sinks(
     return entity_number
 
 
+def _route_end_for_lane_anchor(anchor, dest_knot) -> tuple[int, int]:
+    """Belt tile to route toward for a consumer lane anchor / inserter knot."""
+    from planners.machine_io import knot_belt_tile
+
+    end = anchor
+    dest_belt = knot_belt_tile(dest_knot)
+    if dest_belt is not None:
+        end = dest_belt
+    return end
+
+
+def _dest_knot_for_base_demand(demand: dict) -> tuple | None:
+    from planners.machine_io import machine_input_inserter_knot
+
+    machine = demand.get("machine")
+    if machine is None:
+        return None
+    mx, my, w, h = machine
+    return machine_input_inserter_knot(
+        mx, my, w, h, FACTORIO_EAST, lane_offset=demand.get("lane_offset", 0)
+    )
+
+
+def _connect_feed_fanout(
+    grid,
+    entities,
+    entity_number,
+    feed_start: tuple[int, int],
+    chest_knot,
+    demands: list[dict],
+    *,
+    resource: str = "",
+    placement_recorder=None,
+) -> int:
+    """
+    Route one input-cell feed to one or more machine inputs.
+
+    Uses a splitter when multiple distinct consumers share the same feed tile,
+    so adding a machine does not redirect the trunk away from existing ones.
+    """
+    from planners.machine_io import place_inserter_knot
+
+    routes: list[dict] = []
+    for demand in demands:
+        dest_knot = _dest_knot_for_base_demand(demand)
+        routes.append(
+            {
+                "anchor": demand["anchor"],
+                "dest_knot": dest_knot,
+                "end": _route_end_for_lane_anchor(demand["anchor"], dest_knot),
+            }
+        )
+
+    entity_number = place_inserter_knot(grid, entities, entity_number, chest_knot)
+
+    unique_ends = {r["end"] for r in routes}
+    if len(routes) == 1 or len(unique_ends) < 2:
+        route = routes[0]
+        entity_number = connect_lane_to_lane(
+            grid,
+            entities,
+            entity_number,
+            feed_start,
+            route["anchor"],
+            source_knot=None,
+            dest_knot=route["dest_knot"],
+        )
+        return entity_number
+
+    feed_x, feed_y = feed_start
+    splitter_x = feed_x + 1
+    splitter_y = feed_y
+    # One belt on the chest inserter drop tile; splitter sits on the next tile east.
+    if not grid.is_occupied(feed_x, feed_y):
+        entity_number = _place_belt(
+            grid, entities, entity_number, feed_x, feed_y, FACTORIO_EAST
+        )
+
+    before = entity_number
+    entity_number = _place_splitter(
+        grid,
+        entities,
+        entity_number,
+        splitter_x,
+        splitter_y,
+        direction=FACTORIO_EAST,
+        name="splitter",
+    )
+
+    if entity_number == before:
+        logger.warning(
+            "Splitter needed at feed %s for %s but tiles occupied; using belt fallback",
+            feed_start,
+            resource,
+        )
+        for route in routes:
+            entity_number = connect_lane_to_lane(
+                grid,
+                entities,
+                entity_number,
+                feed_start,
+                route["anchor"],
+                source_knot=None,
+                dest_knot=route["dest_knot"],
+            )
+        return entity_number
+
+    logger.info(
+        "Placed splitter at (%s, %s) feeding %s consumers from input feed %s",
+        splitter_x,
+        splitter_y,
+        len(unique_ends),
+        feed_start,
+    )
+
+    path_ends = []
+    for route in routes:
+        ex, ey = route["end"]
+        approach = (ex - 1, ey) if ex > feed_x + 3 else (ex, ey)
+        path_ends.append(approach if approach != route["end"] else route["end"])
+
+    sorted_pairs = sorted(zip(routes, path_ends), key=lambda pair: pair[1][1])
+    sorted_ends = [end for _, end in sorted_pairs]
+    branch_starts = _assign_splitter_branch_starts(
+        splitter_x, splitter_y, sorted_ends
+    )
+    entity_number = _route_from_splitter_branches(
+        grid, entities, entity_number, branch_starts, sorted_ends
+    )
+
+    for route, end in sorted_pairs:
+        if end == route["end"]:
+            continue
+        tail = _manhattan_path(end, route["end"])
+        entity_number = place_belt_path(grid, entities, entity_number, tail)
+
+    if placement_recorder is not None:
+        placement_recorder.record(
+            "splitter",
+            f"Input feed splitter: {resource}",
+            [
+                f"Feed start {feed_start}",
+                f"Consumers: {len(unique_ends)}",
+                f"Splitter at ({splitter_x}, {splitter_y})",
+            ],
+            entities,
+            highlights=[feed_start, (splitter_x, splitter_y)],
+        )
+
+    return entity_number
+
+
 def connect_base_materials(
     grid,
     entities,
@@ -923,7 +1133,7 @@ def connect_base_materials(
         blueprint_inputs[resource] = (chest_x0, chest_y0)
 
         # Group consumer inputs by chosen source chest.
-        consumers_by_source: dict[tuple[int, int], list[tuple[int, int]]] = {
+        consumers_by_source: dict[tuple[int, int], list[dict]] = {
             src: [] for src in sources
         }
         for demand in demand_points:
@@ -955,33 +1165,22 @@ def connect_base_materials(
                 chest_y,
                 len(grouped),
             )
+            entity_number = _connect_feed_fanout(
+                grid,
+                entities,
+                entity_number,
+                feed_start,
+                chest_knot,
+                grouped,
+                resource=resource,
+                placement_recorder=placement_recorder,
+            )
             for demand in grouped:
-                consumer_input = demand["anchor"]
-                dest_knot = None
-                if demand.get("machine") is not None:
-                    mx, my, w, h = demand["machine"]
-                    dest_knot = machine_input_inserter_knot(
-                        mx,
-                        my,
-                        w,
-                        h,
-                        FACTORIO_EAST,
-                        lane_offset=demand.get("lane_offset", 0),
-                    )
-                entity_number = connect_lane_to_lane(
-                    grid,
-                    entities,
-                    entity_number,
-                    feed_start,
-                    consumer_input,
-                    source_knot=chest_knot,
-                    dest_knot=dest_knot,
-                )
                 logger.info(
                     "Routed %s from %s to %s",
                     resource,
                     feed_start,
-                    consumer_input,
+                    demand["anchor"],
                 )
 
         if placement_recorder is not None:

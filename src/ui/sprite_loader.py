@@ -24,6 +24,26 @@ class SpriteLoader:
         "assembling-machine-2": (214, 218, 8),
         "assembling-machine-3": (214, 237, 8),
     }
+    SPLITTER_DIRECTION_LAYOUT = {
+        "splitter": {
+            "north": (160, 70, 8),
+            "east": (90, 84, 8),
+            "south": (164, 64, 8),
+            "west": (90, 86, 8),
+        },
+        "fast-splitter": {
+            "north": (160, 70, 8),
+            "east": (90, 84, 8),
+            "south": (164, 64, 8),
+            "west": (90, 86, 8),
+        },
+        "express-splitter": {
+            "north": (160, 70, 8),
+            "east": (90, 84, 8),
+            "south": (164, 64, 8),
+            "west": (94, 86, 8),
+        },
+    }
 
     BELT_DIRECTION_ROWS = {
         "east": 0,
@@ -163,6 +183,36 @@ class SpriteLoader:
             self.logger.error(f"Failed to load underground belt {entity_name}: {e}")
             return False
 
+    def _load_splitter_sprites(self, entity_name, entity_path):
+        """Load frame 0 from splitter direction sheets."""
+        direction_layout = self.SPLITTER_DIRECTION_LAYOUT.get(entity_name)
+        if not direction_layout:
+            return False
+
+        loaded_any = False
+        for direction, (cell_width, cell_height, line_length) in direction_layout.items():
+            sheet_path = entity_path / f"{entity_name}-{direction}.png"
+            if not sheet_path.exists():
+                continue
+            try:
+                sheet = self._load_image(sheet_path)
+                sprite = self._extract_sheet_frame(
+                    sheet, 0, cell_width, cell_height, line_length
+                )
+                self.sprites[f"{entity_name}-{direction}"] = sprite
+                loaded_any = True
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to load splitter sprite {entity_name}-{direction}: {e}"
+                )
+
+        # Keep plain entity key as a stable fallback for code paths
+        if loaded_any and f"{entity_name}-north" in self.sprites:
+            self.sprites[entity_name] = self.sprites[f"{entity_name}-north"]
+            self.logger.info(f"Loaded splitter sprites for {entity_name}")
+            return True
+        return False
+
     def _load_entity_sprite(self, entity_name, entity_path):
         png_files = list(entity_path.glob("*.png"))
         if not png_files:
@@ -219,6 +269,8 @@ class SpriteLoader:
             return True
         if entity_name in INSERTER_ENTITIES or entity_name.endswith("-inserter"):
             return True
+        if "splitter" in entity_name:
+            return True
         return False
 
     def _load_all_sprites(self):
@@ -246,6 +298,11 @@ class SpriteLoader:
             entity_path = self.factorio_path / entity_name
             if entity_path.is_dir():
                 self._load_underground_belt(entity_name, entity_path)
+
+        for splitter_name in self.SPLITTER_DIRECTION_LAYOUT:
+            entity_path = self.factorio_path / splitter_name
+            if entity_path.is_dir():
+                self._load_splitter_sprites(splitter_name, entity_path)
 
         for entity_folder in self.factorio_path.iterdir():
             if not entity_folder.is_dir():

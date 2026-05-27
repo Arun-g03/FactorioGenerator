@@ -91,6 +91,23 @@ class TestAssistedRouting(unittest.TestCase):
         inserters = [e for e in state.entities if "inserter" in e.get("name", "")]
         self.assertGreater(len(inserters), 0)
 
+    def test_one_input_splits_to_two_smelters(self):
+        state = self._state()
+        cell = state.place_input_cell(10, 20)
+        state.assign_input_resources_bulk([cell.id], "iron-ore")
+        f1 = state.place_machine("stone-furnace", 50, 20, (2, 2))
+        f2 = state.place_machine("stone-furnace", 50, 40, (2, 2))
+        state.assign_recipes_bulk([f1.id, f2.id], "iron-plate")
+
+        belts = [e for e in state.entities if e.get("name") == "transport-belt"]
+        belt_tiles = {(int(e["position"]["x"]), int(e["position"]["y"])) for e in belts}
+        splitters = [e for e in state.entities if e.get("name") == "splitter"]
+
+        self.assertGreater(len(splitters), 0)
+        # Belts run on each furnace's input lane row (machine center y).
+        self.assertTrue(any(x >= 15 and y == 21 for x, y in belt_tiles))
+        self.assertTrue(any(x >= 15 and y == 41 for x, y in belt_tiles))
+
     def test_multiple_input_cells_feed_nearest_consumers(self):
         state = self._state()
         top = state.place_input_cell(10, 20)
