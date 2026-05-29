@@ -38,6 +38,7 @@ class GeneticPlacementSettings:
     placement_x_max: int = 160
     placement_y_min: int = 4
     placement_y_max: int = 90
+    worker_count: int = 0
 
     def clamp(self) -> GeneticPlacementSettings:
         x_min = max(0, min(200, int(self.placement_x_min)))
@@ -54,6 +55,7 @@ class GeneticPlacementSettings:
             placement_x_max=x_max,
             placement_y_min=y_min,
             placement_y_max=y_max,
+            worker_count=max(0, min(32, int(self.worker_count))),
         )
 
 
@@ -114,6 +116,7 @@ def apply_genetic_settings(settings: GeneticPlacementSettings):
         "PLACEMENT_X_MAX": gp.PLACEMENT_X_MAX,
         "PLACEMENT_Y_MIN": gp.PLACEMENT_Y_MIN,
         "PLACEMENT_Y_MAX": gp.PLACEMENT_Y_MAX,
+        "GA_WORKER_COUNT": gp.GA_WORKER_COUNT,
     }
     gp.DEFAULT_POPULATION_SIZE = settings.population_size
     gp.MIN_GENERATIONS = settings.min_generations
@@ -124,6 +127,7 @@ def apply_genetic_settings(settings: GeneticPlacementSettings):
     gp.PLACEMENT_X_MAX = settings.placement_x_max
     gp.PLACEMENT_Y_MIN = settings.placement_y_min
     gp.PLACEMENT_Y_MAX = settings.placement_y_max
+    gp.GA_WORKER_COUNT = settings.worker_count
     try:
         yield
     finally:

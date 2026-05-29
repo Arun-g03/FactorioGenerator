@@ -2,7 +2,7 @@
 
 Reference for how machines, belts, and inserters are positioned when generating a blueprint. This document describes the **active pipeline** (`ProductionPlanner` → `machine_io` → `stage_connector`). Legacy helpers under `machine_placer/` are noted at the end but are not wired into `main.py` by default.
 
-See also: [generation.md](generation.md) (end-to-end flow), [architecture.md](architecture.md) (module map).
+See also: [generation.md](generation.md) (end-to-end flow), [belt-routing.md](belt-routing.md) (inter-stage belts), [architecture.md](architecture.md) (module map).
 
 ---
 
@@ -10,7 +10,7 @@ See also: [generation.md](generation.md) (end-to-end flow), [architecture.md](ar
 
 Placement happens in three layers:
 
-1. **Machine positions** — rule-based columns or genetic search
+1. **Machine positions** — dependency-network rules or genetic search
 2. **Per-machine I/O** — belts and inserters around each machine (`place_machine_io_block`)
 3. **Inter-stage routing** — belts from producers and raw buses to consumers (`stage_connector`)
 
@@ -39,57 +39,39 @@ All placement uses `core/grid_env.py` `Grid`:
 
 - A tile is blocked if **any** cell in an entity footprint is already in `grid.occupied`.
 - `occupy(x, y, entity_name, [w, h])` marks every cell in the rectangle.
-- Belts and inserters occupy **1×1** cells.
-- Inter-stage belts are skipped on occupied tiles (no underground belts); dense layouts can leave gaps.
+- Belts and inserters occupy **1×1** cells (splitters **2×1**).
+- Inter-stage belts skip occupied surface tiles; straight blocked runs may use **underground-belt pairs**.
 
 ---
 
 ## Rule-based machine placement
 
-**Source:** `ProductionPlanner.generate()` in `planners/production_planner.py`.
+**Source:** `ProductionPlanner.generate()` + `planners/rule_based_placement.py`.
 
-### Stage columns
+Placement follows the **recipe dependency graph**, not a fixed left-to-right strip:
 
-Each rate-graph item (stage) gets one horizontal band:
+| Concept | Detail |
+|---------|--------|
+| Root stages | No upstream producers → `NetworkLayoutCursor.allocate_root_origin()` at seed X/Y |
+| Downstream stages | Anchor near upstream `output_end` tiles; pick cardinal flow (E/S/W/N) minimizing Manhattan distance |
+| Connection gap | Configurable clearance between producer output and consumer input (default 2 tiles) |
+| Machine row | Machines in a stage offset along the chosen flow direction via `machine_row_step()` |
+| Overlap fallback | `PositionFinder.find_placement_near()` if footprint blocked |
 
-| Parameter | Value | Meaning |
-|-----------|-------|---------|
-| `_next_stage_x` start | `10` | First stage begins at x = 10 |
-| Machine spacing | `w + 6` | Gap between machines in the same stage |
-| Stage padding | `+ 6` inside width calc | Extra margin in stage width |
-| `_stage_spacing` | `18` | Gap between stage columns after each stage |
-| `_stage_y` | `12`, `15`, `18`, or `22` | Candidate row; best score wins |
+### Configurable parameters (`RuleBasedPlacementSettings`)
 
-Stage width:
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `connection_gap` | 2 | Tiles between upstream output and consumer input lane |
+| `network_seed_x` | 12 | First root stage X |
+| `network_seed_y` | 14 | First root stage Y |
+| `row_stride_y` | 14 | Vertical spacing when wrapping root stages to a new row |
 
-```
-total_width = machine_count * (machine_w + 6) + 6
-```
+Editable in workspace **Options**; saved to `config.json`.
 
-Machines in a stage are placed at:
+### Scoring
 
-```
-mx = x_start + i * (machine_w + 6)
-my = y_start
-```
-
-### Overlap fallback
-
-If `grid.is_occupied(mx, my, w, h)`:
-
-1. Call `PositionFinder.find_next_available_position_with_spacing(w, h)`.
-2. Search area: x ∈ [10, 60), y ∈ [10, 60) (within grid bounds).
-3. Require **full I/O clearance**: tiles from `x - 3` through `x + 6 + width` and height `h` must be free.
-4. If no position is found, that machine is **skipped** (logged).
-
-### Row selection
-
-For each candidate `stage_y`, the planner:
-
-1. Resets grid occupancy from a backup.
-2. Places all nodes in topological order.
-3. Scores with `evaluate_stage_layout()` (machines only; no connector belts yet).
-4. Keeps the layout with the highest `LayoutFitnessBreakdown.total`.
+After all machines + I/O are placed, `evaluate_rule_machine_layout()` scores viability and estimated connection distance **before** inter-stage belts are routed.
 
 ---
 
@@ -97,14 +79,14 @@ For each candidate `stage_y`, the planner:
 
 **Source:** `planners/genetic_placement.py`.
 
-### Search bounds
+### Search bounds (defaults)
 
 | Constant | Value |
 |----------|-------|
-| `PLACEMENT_X_MIN` | 15 |
-| `PLACEMENT_X_MAX` | 90 (minus machine width) |
-| `PLACEMENT_Y_MIN` | 12 |
-| `PLACEMENT_Y_MAX` | 55 (minus machine height) |
+| `PLACEMENT_X_MIN` | 5 |
+| `PLACEMENT_X_MAX` | 160 (minus machine width) |
+| `PLACEMENT_Y_MIN` | 4 |
+| `PLACEMENT_Y_MAX` | 90 (minus machine height) |
 
 Top of the map (y ≈ 6) is reserved for the **base resource bus**; genetic search starts below that.
 
@@ -112,22 +94,21 @@ Top of the map (y ≈ 6) is reserved for the **base resource bus**; genetic sear
 
 - One gene per machine slot (topological order, expanded by `machine_count`).
 - Machine footprints must **not overlap** each other in a layout.
-- Initialization tries up to **80** random positions per machine; fallback stacks at `(PLACEMENT_X_MIN + index * 8, PLACEMENT_Y_MIN)`.
-- After evolution, placement uses the same `place_machine_io_block` and overlap fallback as rule-based mode.
+- Initialization tries random positions within bounds; fallback stacks along X.
+- After evolution, placement uses `place_machine_io_block` with east flow.
 
 ### GA parameters (defaults)
 
 | Parameter | Value |
 |-----------|-------|
-| Population | 48 |
+| Population | 64 |
 | Min generations | 20 |
 | Max generations | 2500 |
-| Stale limit | 40 generations without improvement |
-| Improvement epsilon | 0.5 fitness points |
+| Stale limit | 120 generations without improvement |
+| Improvement epsilon | 0.1 fitness points |
 | Mutation rate | 85% of children |
-| Elite retention | top 25% of population |
 
-Fitness uses the same `layout_fitness` scorer as rule-based row selection.
+Bounds and GA knobs are overridable via **Options** → saved to `config.json` (`GeneticPlacementSettings`).
 
 ---
 
@@ -135,7 +116,9 @@ Fitness uses the same `layout_fitness` scorer as rule-based row selection.
 
 **Source:** `planners/machine_io.py` — used by both strategies.
 
-### East-flow layout (default: `flow_east=True`)
+### Cardinal-flow layout (parameter: `flow_direction`)
+
+Default east; rule-based mode picks N/E/S/W per stage:
 
 ```
 [belt][belt][belt] → [inserter] → [machine] → [inserter] → [belt][belt][belt]
@@ -143,12 +126,13 @@ Fitness uses the same `layout_fitness` scorer as rule-based row selection.
 
 | Element | Position rule |
 |---------|----------------|
-| Lane Y | `machine_y + machine_h // 2` |
-| Input belts | 3 tiles west of machine, starting at `machine_x - 4` |
-| Input inserter | `(machine_x - 1, lane_y)` |
-| Output inserter | `(machine_x + machine_w, lane_y)` |
-| Output belts | 3 tiles east of machine, starting at `machine_x + machine_w + 1` |
-| Belt direction | `FACTORIO_EAST` (4) |
+| Lane center | Perpendicular offset from machine origin based on flow direction |
+| Input belts | 3 tiles on the input side of the machine |
+| Input inserter | Adjacent to machine on input side |
+| Output inserter | Adjacent to machine on output side |
+| Output belts | 3 tiles on the output side |
+| Multi-ingredient | One belt row per ingredient, offset perpendicular to flow (`INGREDIENT_LANE_SPACING`) |
+| Belt direction | `direction_for_flow(flow_direction)` |
 
 ### Placement guards
 
@@ -158,20 +142,20 @@ Fitness uses the same `layout_fitness` scorer as rule-based row selection.
 
 ### Lane anchors (for stage connection)
 
-From `stage_connector.machine_io_lanes()`:
+From `stage_lanes_from_machines()` / `machine_io_lanes()`:
 
-| Anchor | Tile |
-|--------|------|
-| `input_start` | `(machine_x - 4, lane_y)` — west end of input belt run |
-| `output_end` | `(machine_x + width + 3, lane_y)` — east end of output belt run |
+| Anchor | Meaning |
+|--------|---------|
+| `input_start` / `input_connects` | Where upstream belts meet the consumer (per ingredient lane) |
+| `output_end` / `output_start` | Producer output side for routing |
 
-For a stage with multiple machines in a row, connectors use the **leftmost** machine’s `input_start` and the **rightmost** machine’s `output_end`.
+For a stage with multiple machines in a row, connectors aggregate lanes across the machine row.
 
 ---
 
 ## Inter-stage connection rules
 
-**Source:** `planners/stage_connector.py` — runs after machine + I/O placement.
+**Source:** `planners/stage_connector.py` — `route_placed_layout()`. Full routing reference: [belt-routing.md](belt-routing.md).
 
 ### Crafted ingredient links (`connect_stages`)
 
@@ -179,24 +163,24 @@ For each stage `item` and each dependency `dep` that is **not** a base material 
 
 | Rule | Detail |
 |------|--------|
-| Producer anchor | `output_end` of stage `dep` |
-| Consumer anchor | `input_start` of stage `item` |
-| Path shape | L-shaped Manhattan: horizontal first, then vertical |
-| Path endpoints | From `(output_end_x + 1, y)` to `(input_start_x - 1, target_y)` |
-| Multiple ingredients | `lane_offset = ingredient_index * 2` (parallel vertical feeds) |
-| Belt on occupied tile | Skipped (no belt placed) |
+| Producer anchor | Output lane for ingredient `dep` (lane index from recipe order) |
+| Consumer anchor | Matching `input_connect` tile on consumer stage |
+| Path shape | L-shaped Manhattan via `place_belt_path()` |
+| Blocked straight run | May bridge with **underground-belt** input/output pair |
+| Multiple targets | **Splitters** (2×1, east-facing) fan out when fan-out is required |
+| Belt on occupied tile | Skipped on surface; try underground on eligible straight segments |
 | Flow direction | `direction_for_flow()` along each path segment |
 
-### Base material bus (`connect_base_materials`)
+### Base material feeds (`connect_base_materials`)
 
 | Rule | Detail |
 |------|--------|
-| Bus Y | `BASE_BUS_Y = 6`, stacked `+2` per additional resource |
-| Bus X range | `BASE_BUS_X_START = 8` for `BASE_BUS_LENGTH = 40` tiles |
-| Bus direction | East (`FACTORIO_EAST`) |
-| Drop to stage | L-path from `(max(8, in_x - 5), bus_y)` to `(in_x - 1, in_y)` |
+| Source | User-placed **Input Cells** (`input_sources`), not an automatic top bus |
+| Assignment | Each consumer input lane routed from nearest input chest |
+| Fan-out | Splitter when one chest feeds multiple distinct machine inputs |
+| Missing input cell | Resource skipped (logged); no belt placed |
 
-Base materials never get machine stages; they only appear on the top bus and drop lines.
+See [belt-routing.md](belt-routing.md) for the full feed algorithm. `BASE_BUS_*` constants are used only for layout fitness estimates.
 
 ---
 
@@ -216,7 +200,7 @@ Scoring is two-tier: **viability** (must pass) then **efficiency** (0–100 when
 | I/O vs machine body | Belt/inserter lane tile inside a machine footprint |
 | I/O collision | Two machines’ I/O lane tiles overlap |
 | Broken chain | Upstream crafted `dep` has no stage for consumer `item` |
-| Backward route | Producer `output_end_x >= consumer input (with offset)` — violates east flow |
+| Flow connectivity | `validate_blueprint_flow()` errors when entities are provided (post-routing score) |
 | Grid conflict | Machine cell occupied by non-machine entity (when `grid` passed in) |
 | Empty genetic slot | Fewer `(x, y, item)` entries than machine slots |
 
@@ -230,7 +214,7 @@ Normalized per machine count; combined weights: footprint **45%**, belts **40%**
 | Belts | Estimated belt tiles (per-machine I/O + Manhattan routes + base bus) |
 | Layout | Outliers far from factory center, loose clusters within a stage, Y distance from preferred row (`15`) for bus-fed stages |
 
-Rule-based placement maximizes this score across `stage_y` candidates. Genetic placement uses it inside every generation.
+Rule-based placement scores with `evaluate_rule_machine_layout()` before connectors; genetic placement uses `layout_fitness` inside the GA loop. After routing, `_score_layout(entities)` re-evaluates with belt entities present.
 
 ---
 
@@ -241,8 +225,9 @@ Rule-based placement maximizes this score across `stage_y` candidates. Genetic p
 | Machine type | From `recipe["machine"]` (default `assembling-machine-1`) |
 | Size | From `recipe["machine_size"]` (default `[3, 3]`) |
 | Recipe field | Set on assemblers and furnaces for the crafted `item` |
-| Belt entity | Always `transport-belt` in active pipeline |
+| Belt entity | `transport-belt`; `underground-belt` for bridges |
 | Inserter entity | Always `inserter` in active pipeline |
+| Splitter entity | `splitter` (2×1 footprint) when fan-out needed |
 
 ---
 
@@ -250,10 +235,9 @@ Rule-based placement maximizes this score across `stage_y` candidates. Genetic p
 
 These are intentional simplifications (see [generation.md](generation.md#known-limitations-read-before-fixing)):
 
-- Splitters, underground belts, loaders
-- Fluids, power, modules, beacons
-- A* / `belt_router` for inter-stage paths (Manhattan only)
-- Full multi-lane splitter networks for assemblers with many ingredients
+- Loaders, fluid handling, power poles
+- Full balancer-grade splitter networks for complex multi-ingredient lines
+- A* / `belt_router` for inter-stage paths (Manhattan + underground instead)
 - `buildngs.json` (not loaded by the main pipeline)
 
 ---
@@ -277,11 +261,14 @@ Prefer extending `machine_io.py` and `stage_connector.py` over duplicating logic
 
 | Concern | File |
 |---------|------|
+| Rule-based network layout | `planners/rule_based_placement.py` |
 | Rule-based + orchestration | `planners/production_planner.py` |
 | Genetic search | `planners/genetic_placement.py` |
 | Machine I/O template | `planners/machine_io.py` |
 | Stage / bus routing | `planners/stage_connector.py` |
+| Placement replay log | `core/placement_recorder.py` |
 | Fitness / viability | `planners/layout_fitness.py` |
+| Placement tunables | `core/placement_settings.py` |
 | Position search | `planners/machine_placer/positioning.py` |
 | Grid | `core/grid_env.py` |
 | Strategy enum | `core/constants.py` (`PlacementStrategy`) |

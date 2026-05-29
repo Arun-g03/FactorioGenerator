@@ -44,6 +44,7 @@ PALETTE_ENTRIES = [INPUT_CELL_PALETTE, OUTPUT_CELL_PALETTE] + [
     "assembling-machine-3",
     "chemical-plant",
 ]
+from assisted_options_modal import AssistedBuildOptionsModal
 from blueprint_renderer import BlueprintRenderer
 from screen_manager import ScreenManager
 from toolbar import Toolbar
@@ -510,11 +511,21 @@ class AssistedBuildWorkspace:
         self.screen_manager = ScreenManager()
         self.renderer = BlueprintRenderer(tile_size=PYGAME_TILE_SIZE)
         self.renderer._recipes_data = recipes_data
-        self.state = AssistedBuildState(grid=Grid(), recipes_data=recipes_data)
+        from core.app_config import load_assisted_settings
+
+        self.assisted_settings = load_assisted_settings()
+        self.state = AssistedBuildState(
+            grid=Grid(),
+            recipes_data=recipes_data,
+            auto_route_on_change=self.assisted_settings.auto_route_on_change,
+            incremental_reroute=self.assisted_settings.incremental_reroute,
+        )
 
         self.width = PYGAME_WINDOW_WIDTH
         self.height = PYGAME_WINDOW_HEIGHT
-        self.palette_width = PALETTE_DEFAULT_WIDTH
+        self.palette_width = float(self.assisted_settings.palette_width)
+        self.options_modal: AssistedBuildOptionsModal | None = None
+        self.show_options = False
         self.placement_building: str | None = None
         self.hover_tile: tuple[int, int] | None = None
         self.recipe_modal: RecipePickerModal | None = None
@@ -530,6 +541,84 @@ class AssistedBuildWorkspace:
         self.blueprint_string: str | None = None
         self.paused = False
         self.pause_selected_button = 0
+        self.transient_message: str | None = None
+        self.transient_message_until_ms: int = 0
+        self._optimize_toolbar_label = "Optimize"
+
+    def _load_assisted_settings(self) -> None:
+        from core.app_config import load_assisted_settings
+
+        self.assisted_settings = load_assisted_settings()
+
+    def _apply_assisted_settings(self) -> None:
+        self.state.auto_route_on_change = self.assisted_settings.auto_route_on_change
+        self.state.incremental_reroute = self.assisted_settings.incremental_reroute
+        self.palette_width = float(self.assisted_settings.palette_width)
+
+    def _sync_optimize_toolbar_label(self) -> None:
+        self._optimize_toolbar_label = (
+            "Stop opt" if self.state.optimization_search_active else "Optimize"
+        )
+
+    def _toggle_optimization_search(self) -> None:
+        """Start/stop continuous belt optimization search."""
+        if self.state.optimization_search_active:
+            self.state.stop_optimization_search()
+            self._sync_optimize_toolbar_label()
+            if self.state.last_optimization:
+                self.transient_message = self.state.last_optimization.message
+            self.transient_message_until_ms = pygame.time.get_ticks() + 8000
+        else:
+            stale = self.assisted_settings.optimization_stale_limit
+            max_iter = self.assisted_settings.optimization_max_iterations
+            if not self.state.start_optimization_search(
+                stale_limit=stale, max_iterations=max_iter
+            ):
+                self.transient_message = "Nothing to optimize (add machines + recipes)"
+                self.transient_message_until_ms = pygame.time.get_ticks() + 4000
+            else:
+                self._sync_optimize_toolbar_label()
+                self._tick_optimization_search()
+        self._sync_renderer_entities()
+        self.blueprint_string = self.state.encode_blueprint_string()
+
+    def _tick_optimization_search(self) -> None:
+        if not self.state.optimization_search_active:
+            return
+        status = self.state.optimization_search_step()
+        self.transient_message = status.message
+        self.transient_message_until_ms = 0
+        self._sync_renderer_entities()
+        self.blueprint_string = self.state.encode_blueprint_string()
+        if not status.continue_search:
+            self._sync_optimize_toolbar_label()
+            self.transient_message_until_ms = pygame.time.get_ticks() + 8000
+
+    def _open_options_modal(self) -> None:
+        self._load_assisted_settings()
+        if self.options_modal is None:
+            self.options_modal = AssistedBuildOptionsModal(self.assisted_settings)
+        else:
+            self.options_modal.settings = self.assisted_settings
+        self.options_modal.set_window_size(self.width, self.height)
+        self.show_options = True
+        self.recipe_modal = None
+        self.resource_modal = None
+        self.product_modal = None
+        self.pending_machine_ids = None
+
+    def _handle_options_action(self, action: str) -> None:
+        from core.app_config import save_assisted_settings
+
+        if action == "save" and self.options_modal:
+            self.assisted_settings = self.options_modal.settings.clamp()
+            save_assisted_settings(self.assisted_settings)
+            self._apply_assisted_settings()
+            self.logger.info("Assisted Build settings saved")
+        else:
+            self._load_assisted_settings()
+            self._apply_assisted_settings()
+        self.show_options = False
 
     def _canvas_left(self) -> int:
         return int(self.palette_width)
@@ -911,6 +1000,7 @@ class AssistedBuildWorkspace:
             "Palette picks building",
             "Q clears tool/selection",
             "Enter/E edit recipe",
+            "R route  U opt search (toggle)",
         ]
         hy = self._canvas_bottom() - 100
         for line in hints:
@@ -1000,6 +1090,26 @@ class AssistedBuildWorkspace:
             text = font.render(label, True, color)
             self.renderer.screen.blit(text, (sx + 4, sy - 16))
 
+    def _draw_transient_message(self) -> None:
+        if not self.transient_message:
+            return
+        if (
+            self.transient_message_until_ms > 0
+            and pygame.time.get_ticks() > self.transient_message_until_ms
+        ):
+            self.transient_message = None
+            return
+        font = pygame.font.Font(None, 24)
+        surf = font.render(self.transient_message, True, (220, 230, 180))
+        pad = 8
+        rect = surf.get_rect()
+        rect.bottom = self._canvas_bottom() - 12
+        rect.centerx = self.width // 2
+        bg = rect.inflate(pad * 2, pad * 2)
+        pygame.draw.rect(self.renderer.screen, (35, 38, 48), bg, border_radius=6)
+        pygame.draw.rect(self.renderer.screen, (90, 100, 120), bg, width=1, border_radius=6)
+        self.renderer.screen.blit(surf, rect)
+
     def _draw_selection_status(self) -> None:
         if (
             not self.selected_machine_ids
@@ -1031,7 +1141,7 @@ class AssistedBuildWorkspace:
         sub = pygame.font.Font(None, 24)
         hint = font.render("Place a machine → set recipe → belts route automatically", True, (160, 165, 175))
         sub_t = sub.render(
-            "Drag to select  |  Del/E on selection  |  Q=clear  |  WASD pan",
+            "Drag to select  |  Del/E on selection  |  O=options  |  Q=clear  |  WASD pan",
             True,
             (120, 125, 135),
         )
@@ -1053,6 +1163,20 @@ class AssistedBuildWorkspace:
                 self.renderer._on_window_resize(self.width, self.height)
                 if self.renderer.toolbar:
                     self.renderer.toolbar.resize(self.width, self.height)
+                if self.options_modal:
+                    self.options_modal.set_window_size(self.width, self.height)
+
+            if self.show_options and self.options_modal and event.type == pygame.KEYDOWN:
+                opt_action = self.options_modal.handle_key(event)
+                if opt_action:
+                    self._handle_options_action(opt_action)
+                continue
+
+            if self.show_options and self.options_modal and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                opt_action = self.options_modal.handle_click(event.pos)
+                if opt_action:
+                    self._handle_options_action(opt_action)
+                continue
 
             if self.resource_modal and event.type == pygame.KEYDOWN:
                 action = self.resource_modal.handle_key(event)
@@ -1120,6 +1244,9 @@ class AssistedBuildWorkspace:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.paused = False
+                    elif event.key == pygame.K_o:
+                        self._open_options_modal()
+                        self.paused = False
                     elif event.key == pygame.K_UP:
                         self.pause_selected_button = max(0, self.pause_selected_button - 1)
                     elif event.key == pygame.K_DOWN:
@@ -1145,10 +1272,22 @@ class AssistedBuildWorkspace:
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    if self.selected_machine_ids and not self.recipe_modal:
+                    if self.state.optimization_search_active:
+                        self.state.stop_optimization_search()
+                        self._sync_optimize_toolbar_label()
+                        if self.state.last_optimization:
+                            self.transient_message = self.state.last_optimization.message
+                        self.transient_message_until_ms = pygame.time.get_ticks() + 5000
+                        self._sync_renderer_entities()
+                        self.blueprint_string = self.state.encode_blueprint_string()
+                    elif self.show_options:
+                        self._handle_options_action("close")
+                    elif self.selected_machine_ids and not self.recipe_modal:
                         self._clear_selection()
                     else:
                         self.paused = True
+                elif event.key == pygame.K_o:
+                    self._open_options_modal()
                 elif event.key == pygame.K_q:
                     self._clear_placement_tool()
                 elif event.key == pygame.K_DELETE:
@@ -1161,6 +1300,8 @@ class AssistedBuildWorkspace:
                     self.state.full_reroute()
                     self._sync_renderer_entities()
                     self.blueprint_string = self.state.encode_blueprint_string()
+                elif event.key == pygame.K_u:
+                    self._toggle_optimization_search()
                 elif event.key == pygame.K_c:
                     self.renderer._center_camera_on_blueprint()
                 elif (
@@ -1173,7 +1314,7 @@ class AssistedBuildWorkspace:
                         if idx < len(PALETTE_ENTRIES):
                             self._select_palette_building(PALETTE_ENTRIES[idx])
 
-            if self.recipe_modal or self.resource_modal or self.product_modal:
+            if self.show_options or self.recipe_modal or self.resource_modal or self.product_modal:
                 continue
 
             if event.type == pygame.MOUSEMOTION:
@@ -1274,6 +1415,7 @@ class AssistedBuildWorkspace:
     def _update_keyboard_pan(self) -> None:
         can_pan = (
             not self.paused
+            and not self.show_options
             and not self.recipe_modal
             and not self.resource_modal
             and not self.product_modal
@@ -1296,11 +1438,14 @@ class AssistedBuildWorkspace:
         self._draw_placement_preview()
         self._draw_box_selection()
         self._draw_selection_highlights()
-        self._draw_machine_labels()
+        if self.assisted_settings.show_machine_labels:
+            self._draw_machine_labels()
         self._draw_selection_status()
+        self._draw_transient_message()
         screen.set_clip(None)
         self._draw_palette()
         if self.renderer.toolbar:
+            self.renderer.toolbar.button_labels["optimize"] = self._optimize_toolbar_label
             self.renderer.toolbar.draw(screen)
         if self.resource_modal:
             self.resource_modal.draw(screen, self.width, self.height)
@@ -1308,6 +1453,8 @@ class AssistedBuildWorkspace:
             self.product_modal.draw(screen, self.width, self.height)
         elif self.recipe_modal:
             self.recipe_modal.draw(screen, self.width, self.height)
+        if self.show_options and self.options_modal:
+            self.options_modal.draw(screen)
         if self.paused:
             self._draw_pause_menu()
 
@@ -1335,14 +1482,20 @@ class AssistedBuildWorkspace:
                 self.state.full_reroute()
                 self._sync_renderer_entities()
                 self.blueprint_string = self.state.encode_blueprint_string()
+            elif result == "optimize":
+                self._toggle_optimization_search()
             elif result == "copy":
                 if self.blueprint_string and self.renderer.toolbar:
                     self.renderer.toolbar.copy_to_clipboard(self.blueprint_string)
             elif result == "center":
                 self.renderer._center_camera_on_blueprint()
+            elif result == "options":
+                self._open_options_modal()
             elif result == "pause":
                 self.paused = not self.paused
             self._update_keyboard_pan()
+            if self.state.optimization_search_active:
+                self._tick_optimization_search()
             self._draw_frame()
             self.screen_manager.flip()
             self.screen_manager.tick(60)

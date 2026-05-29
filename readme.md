@@ -8,11 +8,12 @@ This project allows users to define inputs (e.g., production goals, ratios, layo
 
 ## 🧩 Features
 
-- Generate complete factory blueprints automatically  
-- Visualize layouts using Pygame  
-- Save and load blueprint configurations  
-- Supports scalable factory design logic (assemblers, belts, inserters, etc.)  
-- Dynamic sprite loading from a user's **local Factorio installation** (no assets included)
+- **Autonomous Build** — generate complete factory blueprints from production targets (items/min)
+- **Assisted Build** — place machines by hand; belts and inserters route automatically
+- **Placement Replay** — step through recorded placement reasoning after a generation run
+- Dependency-network rule placement or genetic layout search
+- Configurable placement options (network spacing, GA population, search bounds)
+- Visualize layouts in Pygame with sprites from your **local Factorio installation** (no assets bundled)
 - Interactive recipe configuration with autocomplete
 - Copy blueprints to clipboard with one click
 
@@ -59,24 +60,25 @@ The tool will automatically find the graphics folder. Enter your Factorio instal
 python main.py
 ```
 
-The system will:
-1. Show a main menu
-2. Let you configure recipes and production targets
-3. Generate a blueprint
-4. Display it in a Pygame window for visualization
+The main menu offers:
+
+1. **Autonomous Build** — configure targets, generate, preview on the canvas
+2. **Assisted Build** — manual machine placement with automatic routing
+3. **Placement Replay** — watch each placement step with on-screen reasoning
+4. **Settings** — Factorio install path and window size
 
 ---
 
 ## 🕹️ Controls
 
 ### Main Menu
-- **↑↓ or Mouse**: Navigate options
+- **↑↓ or Mouse**: Navigate (Autonomous Build, Assisted Build, Placement Replay, Settings, Exit)
 - **Enter**: Select option
 - **ESC**: Exit
 
-### Recipe Configuration & Blueprint Viewer
+### Workspace & replay
 
-See [docs/controls.md](docs/controls.md) for the full list (toolbar, **Center**, placement toggle, etc.).
+See [docs/controls.md](docs/controls.md) for toolbar actions, **Options**, placement toggle, camera shortcuts, and replay transport controls.
 
 ---
 

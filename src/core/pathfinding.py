@@ -12,6 +12,21 @@ import logging
 class Pathfinder:
     def __init__(self, grid):
         self.grid = grid
+        self._bounds: tuple[int, int, int, int] | None = None
+
+    def _set_search_bounds(self, start, goal, margin: int = 48) -> None:
+        """Limit A* expansion on sparse unbounded grids."""
+        min_x = min(start[0], goal[0]) - margin
+        max_x = max(start[0], goal[0]) + margin
+        min_y = min(start[1], goal[1]) - margin
+        max_y = max(start[1], goal[1]) + margin
+        self._bounds = (min_x, max_x, min_y, max_y)
+
+    def _in_bounds(self, x: int, y: int) -> bool:
+        if self._bounds is None:
+            return True
+        min_x, max_x, min_y, max_y = self._bounds
+        return min_x <= x <= max_x and min_y <= y <= max_y
 
     def heuristic(self, a, b):
         """Heuristic function (Manhattan distance) for A*."""
@@ -23,9 +38,10 @@ class Pathfinder:
         x, y = position
         for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             neighbor = (x + dx, y + dy)
-            # Build space is intentionally unbounded in assisted routing; treat the
-            # grid as sparse/infinite and only block occupied cells.
-            if not self.grid.is_occupied(neighbor[0], neighbor[1]):
+            nx, ny = neighbor
+            if not self._in_bounds(nx, ny):
+                continue
+            if not self.grid.is_occupied(nx, ny):
                 neighbors.append(neighbor)
         return neighbors
 
@@ -36,6 +52,7 @@ class Pathfinder:
     def shortest_path(self, start, goal):
         """A* algorithm to find the shortest path from start to goal."""
         logging.info(f"Finding shortest path from {start} to {goal}")
+        self._set_search_bounds(start, goal)
 
         if self.grid.is_occupied(goal[0], goal[1]) and not self._is_belt_tile(
             goal[0], goal[1]

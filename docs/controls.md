@@ -7,24 +7,36 @@ How a user (or automated UI test) navigates the application.
 ```mermaid
 stateDiagram-v2
     [*] --> MainMenu
-    MainMenu --> Workspace: Start
+    MainMenu --> Workspace: Autonomous Build
     MainMenu --> Assisted: Assisted Build
+    MainMenu --> Replay: Placement Replay
     MainMenu --> Settings: Settings
     MainMenu --> [*]: Exit
     Settings --> MainMenu: Back
     Workspace --> MainMenu: Pause → Return to menu
     Assisted --> MainMenu: Pause → Return to menu
-    Workspace --> Workspace: Generate / Center / Pan
+    Replay --> MainMenu: Esc
+    Workspace --> Workspace: Generate / Options / Center / Pan
     Assisted --> Assisted: Place / Recipe / Route
+    Replay --> Replay: Step / Play
 ```
 
 1. **`python main.py`** → main menu.
-2. **Start** → blueprint workspace (may open targets modal first if configured).
+2. **Autonomous Build** → blueprint workspace (may open targets modal first if configured).
 3. **Assisted Build** → place machines, set each machine’s recipe, belts route automatically.
-4. **Set targets** (full generate only) → add items and rates → **Generate** in modal or toolbar.
-5. **Copy BP** → clipboard string for Factorio.
+4. **Placement Replay** → set targets, generate with recording, step through placement reasoning.
+5. **Set targets** (Autonomous Build / Replay) → add items and rates → **Generate** in modal or toolbar.
+6. **Copy BP** → clipboard string for Factorio.
 
 ## Main menu
+
+| Option | Action |
+|--------|--------|
+| **Autonomous Build** | Full pipeline: targets → generate → canvas preview |
+| **Assisted Build** | Manual placement with automatic belt routing |
+| **Placement Replay** | Recorded step-through of a generation run |
+| **Settings** | Factorio path, window size |
+| **Exit** | Quit application |
 
 | Input | Action |
 |-------|--------|
@@ -37,15 +49,16 @@ stateDiagram-v2
 - Set **Factorio installation path** (saved to `config.json`, gitignored).
 - Required for sprite preview; generation still runs without it (entities render as placeholders if sprites missing).
 
-## Blueprint workspace
+## Blueprint workspace (Autonomous Build)
 
 ### Toolbar
 
 | Button | Action |
 |--------|--------|
-| **Set Targets** | Open modal: items, rates/min, Assemblers only / From raw |
+| **Targets** | Open modal: items, rates/min, Assemblers only / From raw |
 | **Generate** | `run_generation_pipeline()` with current config |
 | **Place: Rules / Genetic** | Toggle `PlacementStrategy` |
+| **Options** | Open placement tunables for the active strategy (saved to `config.json`) |
 | **Center** | Pan camera so blueprint bounding box is centered above toolbar |
 | **Copy BP** | Copy `blueprint_string` (needs `pyperclip`) |
 | **Pause** | Overlay: Resume or Return to menu |
@@ -59,12 +72,22 @@ stateDiagram-v2
 | Generate | Button in panel → runs pipeline and closes modal on success |
 | Close | ESC or close action |
 
+### Placement options modal
+
+Shown when **Options** is clicked (or `O` in workspace). Fields depend on **Place: Rules** vs **Place: Genetic**:
+
+- **Rules:** connection gap, network seed X/Y, row spacing
+- **Genetic:** population, generation limits, mutation rate, placement region bounds
+
+**Save** persists to `config.json` under `placement_settings`. **Cancel** / ESC discards unsaved edits.
+
 ### Keyboard (workspace)
 
 | Key | Action |
 |-----|--------|
 | `T` | Open targets modal |
 | `G` | Generate (same as toolbar) |
+| `O` | Open placement options modal |
 | `C` | Center camera on blueprint |
 | `R` | Reset camera to origin, zoom 1× |
 | `S` | Screenshot (`blueprint_YYYYMMDD_HHMMSS.png` in cwd) |
@@ -88,6 +111,30 @@ When entities exist and not paused:
 | Resume | Continue workspace |
 | Return to menu | `run_workspace()` returns `"menu"` |
 
+## Placement Replay
+
+After **Placement Replay** from the main menu:
+
+1. Set targets in the same `RecipePanel` modal as Autonomous Build.
+2. **Generate** runs the pipeline with a `PlacementRecorder` attached.
+3. The replay viewer opens with a canvas (left) and reasoning panel (right).
+
+### Replay transport
+
+| Input | Action |
+|-------|--------|
+| ← / → or `A` / `D` | Previous / next step |
+| Space | Play / pause auto-advance (~900 ms per step) |
+| Home / End | First / last step |
+| Click transport bar | `< Prev`, `Next >`, `Play`/`Pause`, `|<< First`, `Last >>|` |
+| Drag on canvas | Pan |
+| Scroll | Zoom |
+| ESC | Return to main menu |
+
+Each step shows a **kind** (e.g. `rate_graph`, `stage_plan`, `machine`, `lanes`, `complete`), title, detail lines, cumulative entity snapshot, and optional tile **highlights**.
+
+Genetic placement produces fewer recorded steps than rule-based; replay works best with **Place: Rules**.
+
 ## Assisted Build workspace
 
 ### Flow
@@ -106,9 +153,23 @@ When entities exist and not paused:
 | Button | Action |
 |--------|--------|
 | **Route all** | Re-run belt routing for every machine with a recipe |
+| **Optimize** / **Stop opt** | Toggle continuous belt optimization search (stops when no improvement for N iterations, or max iters in Options) |
+| **Options** | Open Assisted Build tunables (saved to `config.json`) |
 | **Center** | Center camera on blueprint |
 | **Copy BP** | Copy encoded blueprint string |
 | **Pause** | Resume or return to main menu |
+
+### Options modal
+
+Shown when **Options** is clicked (or `O` in workspace):
+
+- **Auto-route when layout changes** — reroute after recipe/cell assign or machine delete (toolbar **Route all** always runs)
+- **Show machine / I/O labels** — toggle on-canvas labels
+- **Palette width** — left sidebar width in pixels
+- **Opt. search stale limit** — stop search after this many trials without a better layout (default 20)
+- **Opt. search max iters** — hard cap on trials (`0` = no cap)
+
+**Save** persists to `config.json` under `assisted_build_settings`. **Close** / ESC discards unsaved edits.
 
 ### Keyboard
 
@@ -119,10 +180,11 @@ When entities exist and not paused:
 | `Q` | Clear placement tool and selection |
 | `E` / `Enter` | Set recipe for selected machine(s) |
 | `Del` | Delete selected machine(s), or machine under cursor |
-| `Esc` | Clear selection (or pause if nothing selected) |
+| `Esc` | Stop optimization search if active; else clear selection (or pause if nothing selected) |
 | `R` | Route all (same as toolbar) |
+| `U` | Toggle continuous optimization search (same as **Optimize** toolbar) |
+| `O` | Open Assisted Build options modal |
 | `C` | Center camera |
-| `Del` | Remove machine under cursor |
 | Mouse wheel | Zoom on canvas |
 | `W` `A` `S` `D` | Pan canvas (hold) |
 | Left-drag (empty area) | Pan |
@@ -132,4 +194,4 @@ Place an **Input Cell** (`0`) where you want each raw resource chest; belts run 
 
 ## Defaults on first open
 
-`main.py` passes `initial_targets=PRODUCTION_TARGETS` from `constants.py` and may open the targets modal immediately (`open_targets_modal=True`) for **Start** only.
+`main.py` passes `initial_targets=PRODUCTION_TARGETS` from `constants.py` and may open the targets modal immediately (`open_targets_modal=True`) for **Autonomous Build** only.

@@ -121,9 +121,9 @@ class TestAssistedRouting(unittest.TestCase):
         belts = [e for e in state.entities if e.get("name") == "transport-belt"]
         belt_tiles = {(int(e["position"]["x"]), int(e["position"]["y"])) for e in belts}
 
-        # We should see feed belts extending east from both input-cell rows.
-        self.assertTrue(any(x >= 11 and y == 20 for x, y in belt_tiles))
-        self.assertTrue(any(x >= 11 and y == 40 for x, y in belt_tiles))
+        # Feed belts extend east from each input-cell row (chest y or furnace input lane).
+        self.assertTrue(any(x >= 11 and y in (20, 21) for x, y in belt_tiles))
+        self.assertTrue(any(x >= 11 and y in (40, 41) for x, y in belt_tiles))
 
     def test_assign_recipes_bulk(self):
         state = self._state()

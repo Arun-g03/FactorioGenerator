@@ -47,6 +47,11 @@ def _entity_footprint(entity: dict, recipes_data: dict | None) -> tuple[int, int
 
     for key, size in _DEFAULT_SIZES.items():
         if key in name or name == key:
+            if "splitter" in name:
+                direction = entity.get("direction")
+                if direction in (0, 8):  # Factorio north / south
+                    return 1, 2
+                return 2, 1
             return size
     if "furnace" in name:
         return 2, 2

@@ -79,10 +79,25 @@ def _add_edge(adj: dict[tuple[int, int], set[tuple[int, int]]], src, dst) -> Non
 
 def build_tile_map(entities: list[dict]) -> dict[tuple[int, int], dict]:
     """Map grid corner tiles to entity dicts (last writer wins on overlap)."""
+    from core.splitter_geometry import splitter_layout
+
     tile_map: dict[tuple[int, int], dict] = {}
     for entity in entities:
         x, y = _entity_tile(entity)
+        name = entity.get("name", "")
+        if name in SPLITTER_NAMES:
+            layout = splitter_layout((x, y), entity.get("direction", FACTORIO_EAST))
+            for tile in layout.footprint:
+                tile_map[tile] = entity
+            continue
         tile_map[(x, y)] = entity
+        size = entity.get("size")
+        if isinstance(size, (list, tuple)) and len(size) >= 2:
+            ew, eh = int(size[0]), int(size[1])
+            if ew > 1 or eh > 1:
+                for dx in range(ew):
+                    for dy in range(eh):
+                        tile_map[(x + dx, y + dy)] = entity
     return tile_map
 
 
@@ -189,22 +204,13 @@ def build_flow_adjacency(
             drop = inserter_drop_tile((x, y), direction)
             _add_edge(adj, pickup, drop)
         elif name in SPLITTER_NAMES:
-            if direction == FACTORIO_EAST:
-                _add_edge(adj, (x - 1, y), (x, y))
-                _add_edge(adj, (x, y), (x + 1, y))
-                _add_edge(adj, (x + 1, y), (x + 2, y))
-            elif direction == FACTORIO_WEST:
-                _add_edge(adj, (x + 2, y), (x + 1, y))
-                _add_edge(adj, (x + 1, y), (x, y))
-                _add_edge(adj, (x, y), (x - 1, y))
-            elif direction == FACTORIO_SOUTH:
-                _add_edge(adj, (x, y - 1), (x, y))
-                _add_edge(adj, (x, y), (x, y + 1))
-                _add_edge(adj, (x, y + 1), (x, y + 2))
-            elif direction == FACTORIO_NORTH:
-                _add_edge(adj, (x, y + 2), (x, y + 1))
-                _add_edge(adj, (x, y + 1), (x, y))
-                _add_edge(adj, (x, y), (x, y - 1))
+            from core.splitter_geometry import splitter_flow_edges
+
+            anchor = _entity_tile(entity)
+            if (x, y) != anchor:
+                continue
+            for src, dst in splitter_flow_edges(anchor, direction):
+                _add_edge(adj, src, dst)
         elif name in CHEST_NAMES:
             _add_edge(adj, (x, y), (x + dx, y + dy))
 

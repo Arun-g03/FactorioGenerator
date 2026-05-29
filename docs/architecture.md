@@ -16,6 +16,7 @@ flowchart LR
     end
     subgraph Planners
         PP[ProductionPlanner]
+        RB[rule_based_placement]
         IO[machine_io]
         SC[stage_connector]
         GP[genetic_placement]
@@ -26,6 +27,7 @@ flowchart LR
     BR --> PL
     PL --> BM
     BM --> PP
+    PP --> RB
     PP --> IO
     PP --> SC
     PP --> GP
@@ -41,7 +43,7 @@ FactorioGenerator/
 ├── main.py              # Entry: sys.path setup, config, menus, recipes load
 ├── config.json          # User-local (gitignored): Factorio install path
 ├── docs/                # This documentation
-├── tests/               # unittest (calculations today)
+├── tests/               # unittest (calculations, placement, routing, splitters, …)
 └── src/
     ├── core/            # Grid, pipeline, encoding, routing utilities
     ├── planners/        # Production planning, placement, connection
@@ -78,11 +80,12 @@ When adding modules, match the folder you are in. Running tests uses `sys.path.i
 | 2 | `core/pipeline.py` | `run_generation_pipeline()` — grid, manager, encode, `BlueprintGenerationResult` |
 | 3 | `core/blueprint_manager.py` | Instantiates `ProductionPlanner`, picks rule vs genetic |
 | 4 | `planners/production_planner.py` | Rate graph, machine placement, stage connection, summaries |
-| 5 | `planners/machine_io.py` | Per-machine belt + inserter block (east flow) |
-| 6 | `planners/stage_connector.py` | Manhattan belt paths between stages + base-material bus |
-| 7 | `planners/genetic_placement.py` | Optional GA positions (when `PlacementStrategy.GENETIC`) |
-| 8 | `planners/layout_fitness.py` | Scores layouts (viability + efficiency); drives rule-based row pick |
-| 9 | `core/blueprintEncoder.py` | Blueprint JSON → export string |
+| 5 | `planners/rule_based_placement.py` | Dependency-network origins, cardinal flow, layout scoring |
+| 6 | `planners/machine_io.py` | Per-machine belt + inserter block (any cardinal flow) |
+| 7 | `planners/belt_network/` + `stage_connector.py` | Network link router (default) + `route_placed_layout()` facade ([belt-routing.md](belt-routing.md)) |
+| 8 | `planners/genetic_placement.py` | Optional GA positions (when `PlacementStrategy.GENETIC`) |
+| 9 | `planners/layout_fitness.py` | Scores layouts (viability + efficiency); drives GA and post-placement scoring |
+| 10 | `core/blueprintEncoder.py` | Blueprint JSON → export string |
 
 ### Shared runtime objects
 
@@ -92,7 +95,11 @@ Each generation creates a fresh:
 - **`Pathfinder`** — A* over free tiles (used by `BeltRouter`, not by `stage_connector`).
 - **`BeltRouter`** — Places belts along A* paths; **not** used for inter-stage links today.
 
-`ProductionPlanner` receives all three but stage linking is implemented in `stage_connector` with L-shaped Manhattan paths.
+`ProductionPlanner` receives all three but inter-stage linking is implemented in `stage_connector.route_placed_layout()` with Manhattan paths, underground-belt bridges, and east-facing splitters for multi-consumer fan-out.
+
+Optional **`PlacementRecorder`** (`core/placement_recorder.py`) captures step snapshots when passed through `BlueprintManager.generate_blueprint(placement_recorder=...)`.
+
+**`PlacementSettingsBundle`** (`core/placement_settings.py`) supplies rule-based and genetic tunables from defaults or `config.json`.
 
 ## Legacy / inactive code (do not extend by default)
 
@@ -115,18 +122,24 @@ If a task says “fix belt routing,” check `stage_connector.py` first, not `ma
 | `pathfinding.py` | A* `shortest_path(start, goal)` |
 | `belt_router.py` | `route_belt()` along A* (skips if endpoints occupied) |
 | `blueprintEncoder.py` | Encode/decode blueprint strings |
-| `constants.py` | Enums, `BASE_MATERIALS`, `PRODUCTION_TARGETS`, Factorio directions |
+| `constants.py` | Enums, `BASE_MATERIALS`, `PRODUCTION_TARGETS`, Factorio 2.0 directions, blueprint version |
 | `entity.py` | Entity helper / `to_dict()` (optional) |
+| `placement_recorder.py` | Step log for Placement Replay UI |
+| `placement_settings.py` | Rule-based + genetic tunables; load/save via `app_config` |
+| `app_config.py` | `config.json` load/save (Factorio path, window size, placement settings) |
 
 ## Planner modules (`src/planners/`)
 
 | Module | Role |
 |--------|------|
 | `production_planner.py` | **Central planner** — `RateNode`, `generate()`, `generate_genetic()` |
-| `machine_io.py` | `place_machine_io_block()` — 3 in belts, inserter, machine, inserter, 3 out belts |
-| `stage_connector.py` | `connect_stages()`, `connect_base_materials()`, lane anchor math |
+| `rule_based_placement.py` | Network layout: `network_origin_for_stage`, `NetworkLayoutCursor`, fitness |
+| `machine_io.py` | `place_machine_io_block()` — belts/inserters for any cardinal flow |
+| `stage_connector.py` | `route_placed_layout()`, `connect_stages()`, splitters, underground belts |
 | `genetic_placement.py` | Population, crossover, mutation, `run_genetic_layout()` |
 | `layout_fitness.py` | `evaluate_stage_layout()`, `LayoutFitnessBreakdown` (0–100 score) |
+| `assisted_routing.py` | Belt routing for Assisted Build workspace |
+| `placement_validation.py` | Overlap and footprint checks for manual placement |
 | `machine_placer/calculations.py` | `ProductionCalculator` — items/min, machine counts (used by planner) |
 | `machine_placer/positioning.py` | `PositionFinder` — fallback search when overlap |
 
@@ -136,6 +149,9 @@ If a task says “fix belt routing,” check `stage_connector.py` first, not `ma
 |--------|------|
 | `blueprint_renderer.py` | Workspace loop, camera, entity rendering, generation hook |
 | `recipe_panel.py` | Targets modal, autocomplete, `get_generation_config()` |
+| `placement_options_modal.py` | Rule-based / genetic tunables overlay |
+| `placement_replay.py` | Step-through replay viewer + `run_placement_replay_session()` |
+| `assisted_build.py` | Manual placement workspace |
 | `toolbar.py` | Bottom bar button hits |
 | `main_menu.py` / `settings_menu.py` | App navigation |
 | `sprite_loader.py` / `sprite_mapper.py` | Load sprites from `FACTORIO_BASE_GRAPHICS_PATH` |
@@ -164,7 +180,9 @@ One node in the production graph: item name, required rate, recipe dict, machine
 |------|-----------------|
 | New item recipe | `src/data/recipes.json` |
 | New placement algorithm | `PlacementStrategy` + branch in `BlueprintManager` + new planner method |
-| Better stage belts | `stage_connector.py` (lane anchors, routing, multi-lane inputs) |
-| Belt pathfinding for gaps | Wire `belt_router` from connector or teach pathfinder to allow belt tiles |
-| UI control | `toolbar.py` + `blueprint_renderer.handle_events` / `run_workspace` |
+| Better stage belts | `planners/belt_network/` (pathfinder, amendments) and `stage_connector.py` primitives |
+| Belt pathfinding for gaps | `belt_network/pathfinder.py` (UG meta-edges) and `place_belt_path` |
+| UI control | `toolbar.py` + `blueprint_renderer.run_workspace` / `handle_events` |
+| Placement tunables | `placement_settings.py` + `placement_options_modal.py` |
 | Default targets | `constants.PRODUCTION_TARGETS` or recipe panel only |
+| Debug placement reasoning | Wire `PlacementRecorder` (see `placement_replay.py`) |

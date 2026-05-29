@@ -55,10 +55,10 @@ python main.py
 ## Verify install
 
 ```bash
-python -m unittest tests.test_calculations -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Expected: tests pass for iron plate furnace rate and gear assembler rate.
+Requires **Python 3.10+** (see Requirements). With 3.10+, tests cover calculations, rule-based layout, belt routing, splitters, underground belts, inserter directions, placement validation, and more. `test_sprite_sheets` needs a valid Factorio graphics path in `config.json`.
 
 ## Troubleshooting
 

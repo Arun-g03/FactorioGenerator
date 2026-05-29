@@ -70,6 +70,20 @@ def save_placement_settings(bundle) -> None:
     save_config(bundle_to_config_dict(bundle))
 
 
+def load_assisted_settings(config: dict | None = None):
+    """Assisted Build tunables from config."""
+    from core.assisted_settings import settings_from_config
+
+    return settings_from_config(config if config is not None else load_config())
+
+
+def save_assisted_settings(settings) -> None:
+    """Persist assisted_build_settings section in config.json."""
+    from core.assisted_settings import settings_to_config_dict
+
+    save_config(settings_to_config_dict(settings))
+
+
 def apply_factorio_paths(config: dict | None = None) -> None:
     """Apply Factorio install/graphics paths from config to constants."""
     from core import constants as constants_module

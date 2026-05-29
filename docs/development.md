@@ -21,10 +21,24 @@ python main.py
 ### Tests
 
 ```bash
-python -m unittest tests.test_calculations -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Tests insert `src/` on `sys.path` and cover `ProductionCalculator` only. There are no integration tests for placement or encoding yet.
+Requires Python 3.10+. Tests insert `src/` on `sys.path` and cover:
+
+| Module | Focus |
+|--------|--------|
+| `test_calculations` | `ProductionCalculator` rates |
+| `test_rule_based_placement` | Network origins, stage depths |
+| `test_belt_paths`, `test_layout_routing` | Stage connector paths |
+| `test_splitters_generation`, `test_underground_belts` | Splitter / underground routing |
+| `test_machine_io_lanes`, `test_inserter_directions` | I/O geometry and directions |
+| `test_flow_connectivity`, `test_placement_validation` | Layout invariants |
+| `test_assisted_routing` | Assisted Build belt logic |
+| `test_entity_footprint` | Entity sizes |
+| `test_sprite_sheets` | Sprite loading (needs Factorio path in `config.json`) |
+
+There are no full end-to-end UI integration tests yet.
 
 ## Mental model
 
@@ -33,7 +47,7 @@ Tests insert `src/` on `sys.path` and cover `ProductionCalculator` only. There a
 3. **Planner writes entities + grid occupancy**, then **connector adds belts**.
 4. **Encoder produces string**; renderer displays entities.
 
-If belts look wrong, trace: `stage_machines` → `connect_stages` → `_manhattan_path` → `_place_belt` (skips occupied cells).
+If belts look wrong, trace: `stage_machines` → `route_placed_layout()` → `connect_stages` / `place_belt_path` → underground bridge or splitter fan-out.
 
 ## Safe places to change
 
@@ -41,11 +55,14 @@ If belts look wrong, trace: `stage_machines` → `connect_stages` → `_manhatta
 |------|-------|
 | Fix/add recipe | `src/data/recipes.json` |
 | Default demo targets | `src/core/constants.py` → `PRODUCTION_TARGETS` |
-| Stage belt routing | `src/planners/stage_connector.py` |
+| Stage belt routing | `src/planners/stage_connector.py` — see [belt-routing.md](../docs/belt-routing.md) |
 | Per-machine I/O layout | `src/planners/machine_io.py` |
+| Network rule placement | `src/planners/rule_based_placement.py` |
+| Placement tunables | `src/core/placement_settings.py`, `src/ui/placement_options_modal.py` |
 | Machine count / rates | `src/planners/machine_placer/calculations.py` |
-| Rule-based columns | `src/planners/production_planner.py` (`_allocate_stage_position`, `_stage_spacing`) |
 | Genetic search | `src/planners/genetic_placement.py`, `layout_fitness.py` |
+| Assisted Build routing | `src/planners/assisted_routing.py` |
+| Placement replay | `src/core/placement_recorder.py`, `src/ui/placement_replay.py` |
 | New toolbar action | `src/ui/toolbar.py` + `blueprint_renderer.run_workspace` / `handle_events` |
 | Clipboard / encode | `src/core/blueprintEncoder.py` |
 
@@ -69,7 +86,7 @@ logging.basicConfig(level=logging.DEBUG, ...)
 
 Useful log sources:
 
-- `planners.production_planner` — stage_y choice, layout score
+- `planners.production_planner` — network depth, layout score
 - `planners.stage_connector` — connection endpoints
 - `core.pathfinding` — A* paths (if router used)
 
@@ -102,7 +119,8 @@ print(result.layout_fitness)
 3. Implement method on `ProductionPlanner` (mirror `generate` / `generate_genetic`).
 4. Call `_connect_production_stages()` and `_score_layout()` for consistency.
 5. Toolbar label in `toolbar.py`; toggle in `blueprint_renderer._toggle_placement_strategy()`.
-6. Document in [generation.md](generation.md).
+6. Optional tunables in `placement_options_modal.py` + `placement_settings.py`.
+7. Document in [generation.md](generation.md).
 
 ## Adding recipes
 
@@ -122,8 +140,8 @@ print(result.layout_fitness)
 
 Documented for prioritization — not bugs in the sense of crashes:
 
-- Splitters / balanced multi-lane inputs for assemblers with 2+ ingredients
-- Continuous belt paths through gaps (pathfinding through belt layer or reserved corridors)
+- Balanced splitter networks for assemblers with many ingredients (basic splitters exist; complex balancing still simplified)
+- Fluids / power not modeled
 - Use `buildngs.json` as single source for sizes
 - Integration tests: encode round-trip, entity count, connectivity invariants
 - Remove or archive dead `machine_placer` entry points

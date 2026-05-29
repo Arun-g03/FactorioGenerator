@@ -81,6 +81,12 @@ class TestSplittersGeneration(unittest.TestCase):
 
         splitters = [e for e in entities if e.get("name") == "splitter"]
         self.assertGreaterEqual(len(splitters), 1)
+        splitter = splitters[0]
+        sx = int(splitter["position"]["x"])
+        sy = int(splitter["position"]["y"])
+        self.assertTrue(grid.is_occupied(sx, sy))
+        self.assertTrue(grid.is_occupied(sx + 1, sy))
+        self.assertEqual(grid.occupied.get((sx, sy)), "splitter")
 
     def test_no_splitter_when_two_ingredients_one_consumer(self):
         """Two producers → one consumer uses separate lanes, not a splitter."""

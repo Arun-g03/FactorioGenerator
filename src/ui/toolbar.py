@@ -37,6 +37,7 @@ class Toolbar:
             self.logger.warning("pyperclip not available. Copy button will be disabled.")
 
         self.placement_strategy = None
+        self.button_labels: dict[str, str] = {}
 
     def resize(self, width: int, height: int) -> None:
         """Re-anchor the toolbar when the window is resized."""
@@ -57,6 +58,7 @@ class Toolbar:
         button_widths = {
             "targets": 110,
             "generate": 92,
+            "optimize": 88,
             "placement": 118,
             "options": 92,
             "center": 88,
@@ -73,6 +75,13 @@ class Toolbar:
         if self.mode == "assisted":
             button_defs = [
                 ("route", "Route all", button_widths["generate"], self.generate_color),
+                (
+                    "optimize",
+                    self.button_labels.get("optimize", "Optimize"),
+                    button_widths["optimize"],
+                    (90, 105, 130),
+                ),
+                ("options", "Options", button_widths["options"], (85, 95, 115)),
                 ("center", "Center", button_widths["center"], (70, 110, 130)),
                 ("copy", "Copy BP", button_widths["copy"], self.button_color),
                 ("pause", "Pause", button_widths["pause"], self.button_color),

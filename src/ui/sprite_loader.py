@@ -206,9 +206,13 @@ class SpriteLoader:
                     f"Failed to load splitter sprite {entity_name}-{direction}: {e}"
                 )
 
-        # Keep plain entity key as a stable fallback for code paths
-        if loaded_any and f"{entity_name}-north" in self.sprites:
-            self.sprites[entity_name] = self.sprites[f"{entity_name}-north"]
+        # Plain entity key fallback (prefer east; assisted routing uses east splitters)
+        if loaded_any:
+            for fallback_dir in ("east", "north", "south", "west"):
+                key = f"{entity_name}-{fallback_dir}"
+                if key in self.sprites:
+                    self.sprites[entity_name] = self.sprites[key]
+                    break
             self.logger.info(f"Loaded splitter sprites for {entity_name}")
             return True
         return False

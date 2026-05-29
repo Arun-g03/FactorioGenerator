@@ -455,6 +455,119 @@ def _is_machine_entity(name: str) -> bool:
     )
 
 
+def _l_path_tiles(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
+    """Horizontal-first L-path tiles between two points (belt estimate)."""
+    if start == end:
+        return []
+    tiles: list[tuple[int, int]] = []
+    x, y = start
+    end_x, end_y = end
+    step = 1 if end_x >= x else -1
+    while x != end_x:
+        x += step
+        tiles.append((x, y))
+    step = 1 if end_y >= y else -1
+    while y != end_y:
+        y += step
+        tiles.append((x, y))
+    return tiles
+
+
+def _machine_cell_owners(stage_machines: dict[str, list]) -> dict[tuple[int, int], str]:
+    owners: dict[tuple[int, int], str] = {}
+    for item, machines in stage_machines.items():
+        for mx, my, w, h in machines:
+            for cell in _machine_cells(int(mx), int(my), w, h):
+                owners[cell] = item
+    return owners
+
+
+def _connection_routes_blocked(
+    stage_machines: dict[str, list],
+    stage_lanes: dict,
+    nodes: dict,
+) -> list[str]:
+    """Producer output → consumer input paths must not cross unrelated machine bodies."""
+    owners = _machine_cell_owners(stage_machines)
+
+    from planners.machine_io import ingredient_lane_index
+
+    errors: list[str] = []
+    for item, node in nodes.items():
+        if item not in stage_lanes:
+            continue
+        consumer = stage_lanes[item]
+        consumer_recipe = getattr(node, "recipe", None) or {}
+        input_connects = consumer.get(
+            "input_connects", consumer.get("input_starts", [consumer["input_start"]])
+        )
+        for dep in node.dependencies:
+            if dep in BASE_MATERIALS or dep not in stage_lanes:
+                continue
+            producer = stage_lanes[dep]
+            producer_out = producer.get("output_start", producer["output_end"])
+            lane_idx = ingredient_lane_index(consumer_recipe, dep)
+            target_in = input_connects[min(lane_idx, len(input_connects) - 1)]
+            route_start = (producer_out[0] - 1, producer_out[1])
+            blocked = [
+                tile
+                for tile in _l_path_tiles(route_start, target_in)
+                if tile in owners and owners[tile] not in (dep, item)
+            ]
+            if blocked:
+                errors.append(
+                    f"belt route blocked: {dep} -> {item} ({len(blocked)} tile(s) under machines)"
+                )
+    return errors
+
+
+def evaluate_placed_subset(
+    stage_machines: dict[str, list],
+    nodes: dict,
+    *,
+    grid=None,
+) -> LayoutFitnessBreakdown:
+    """
+    Score only machines placed so far (walk-forward / local decisions).
+
+    Uses the same viability rules as a full layout, but does not penalize
+    stages that have not been placed yet. Also checks belt routes between
+    placed producer/consumer pairs do not pass through machine footprints.
+    """
+    if not stage_machines:
+        breakdown = LayoutFitnessBreakdown()
+        breakdown._finalize_total(0)
+        return breakdown
+
+    expected_counts = {
+        item: len(machines) for item, machines in stage_machines.items()
+    }
+    breakdown = evaluate_stage_layout(
+        stage_machines,
+        nodes,
+        grid=grid,
+        preferred_stage_y=None,
+        expected_counts=expected_counts,
+    )
+    if breakdown.blockers:
+        return breakdown
+
+    stage_lanes: dict = {}
+    for item, machines in stage_machines.items():
+        node = nodes.get(item)
+        recipe = getattr(node, "recipe", None) if node else None
+        lanes = stage_lanes_from_machines(machines, recipe=recipe)
+        if lanes:
+            stage_lanes[item] = lanes
+
+    for message in _connection_routes_blocked(stage_machines, stage_lanes, nodes):
+        _add_blocker(breakdown, message)
+
+    if breakdown.blockers:
+        breakdown._finalize_total(breakdown.machine_count)
+    return breakdown
+
+
 def evaluate_machine_positions(
     positions: list[tuple],
     machine_slots: list[tuple[str, dict]],
@@ -485,9 +598,24 @@ def evaluate_machine_positions(
             breakdown._finalize_total(len(stage_machines))
         return breakdown
 
-    return evaluate_stage_layout(
+    breakdown = evaluate_stage_layout(
         stage_machines,
         nodes,
         grid=None,
         expected_counts=expected_counts,
     )
+    if breakdown.blockers:
+        return breakdown
+
+    stage_lanes: dict = {}
+    for item, machines in stage_machines.items():
+        node = nodes.get(item)
+        recipe = getattr(node, "recipe", None) if node else None
+        lanes = stage_lanes_from_machines(machines, recipe=recipe)
+        if lanes:
+            stage_lanes[item] = lanes
+    for message in _connection_routes_blocked(stage_machines, stage_lanes, nodes):
+        _add_blocker(breakdown, message)
+    if breakdown.blockers:
+        breakdown._finalize_total(breakdown.machine_count)
+    return breakdown

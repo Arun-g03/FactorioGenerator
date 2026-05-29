@@ -53,6 +53,31 @@ class AssistedBuildState:
     machines: list[PlacedMachine] = field(default_factory=list)
     entity_number: int = 1
     recipes_data: dict = field(default_factory=dict)
+    auto_route_on_change: bool = True
+    incremental_reroute: bool = False
+    network_router: object | None = None
+    _pending_reroute_group_keys: set[str] | None = None
+    last_optimization: object | None = None
+    optimization_search_active: bool = False
+    _search_links: list | None = field(default=None, repr=False)
+    _search_nodes: dict | None = field(default=None, repr=False)
+    _search_stage_machines: dict | None = field(default=None, repr=False)
+    _search_iteration: int = 0
+    _search_stale: int = 0
+    _search_best_variant: int = 0
+    _search_best_score: tuple = field(default=(-1, -1.0e18, 0, 0), repr=False)
+    _search_stale_limit: int = 20
+    _search_max_iterations: int = 0
+
+    def _maybe_reroute(self, *, group_keys: set[str] | None = None) -> None:
+        if self.optimization_search_active:
+            self.stop_optimization_search()
+        if not self.auto_route_on_change:
+            return
+        if self.incremental_reroute and group_keys and self.network_router is not None:
+            self.partial_reroute(group_keys)
+        else:
+            self.full_reroute()
 
     def _recipe(self, item: str) -> dict | None:
         return self.recipes_data.get("recipes", {}).get(item)
@@ -118,7 +143,7 @@ class AssistedBuildState:
         self.machines = [m for m in self.machines if m.id not in ids]
         removed = before - len(self.machines)
         if removed:
-            self.full_reroute()
+            self._maybe_reroute()
         return removed
 
     def machines_in_tile_rect(
@@ -178,7 +203,12 @@ class AssistedBuildState:
                 entity["recipe"] = recipe_item
             applied += 1
         if applied:
-            self.full_reroute()
+            for mid in machine_ids:
+                machine = self._machine_at(mid)
+                if machine and machine.recipe_item:
+                    self._refresh_machine_lanes(machine)
+            keys = self._group_keys_for_recipe_change(recipe_item)
+            self._maybe_reroute(group_keys=keys if self.incremental_reroute else None)
         return applied
 
     def assign_input_resources_bulk(self, machine_ids: list[str], resource: str) -> int:
@@ -194,7 +224,13 @@ class AssistedBuildState:
             machine.recipe_item = resource
             applied += 1
         if applied:
-            self.full_reroute()
+            keys: set[str] = set()
+            for mid in machine_ids:
+                machine = self._machine_at(mid)
+                if machine and machine.is_input_cell and machine.input_resource:
+                    cx, cy = machine.position
+                    keys.add(f"base:{machine.input_resource}:{cx},{cy}")
+            self._maybe_reroute(group_keys=keys if self.incremental_reroute else None)
         return applied
 
     def assign_output_products_bulk(self, machine_ids: list[str], product: str) -> int:
@@ -210,7 +246,13 @@ class AssistedBuildState:
             machine.recipe_item = product
             applied += 1
         if applied:
-            self.full_reroute()
+            keys: set[str] = set()
+            for mid in machine_ids:
+                machine = self._machine_at(mid)
+                if machine and machine.is_output_cell and machine.output_product:
+                    cx, cy = machine.position
+                    keys.add(f"sink:{machine.output_product}:{cx},{cy}")
+            self._maybe_reroute(group_keys=keys if self.incremental_reroute else None)
         return applied
 
     def _find_machine_entity(self, machine: PlacedMachine) -> dict | None:
@@ -243,6 +285,7 @@ class AssistedBuildState:
 
     def full_reroute(self) -> None:
         """Clear routing artifacts and rebuild belts for all assigned recipes."""
+        self.network_router = None
         self._rebuild_machine_entities()
         for machine in self.machines:
             if _is_io_cell(machine) or not machine.recipe_item:
@@ -264,7 +307,466 @@ class AssistedBuildState:
             nodes,
             input_sources=input_sources or None,
             output_sinks=output_sinks or None,
+            network_router=None,
         )
+        from planners.stage_connector import route_placed_layout as _rpl
+
+        self.network_router = getattr(_rpl, "_last_router", None)
+
+    def _prepare_optimization_context(self):
+        """Build link graph context for optimize / search. Returns tuple or None."""
+        from planners.belt_network.link_graph import build_link_graph, sort_links
+
+        nodes = rate_nodes_from_machines(self.machines, self.recipes_data)
+        stage_machines = stage_machines_from_placed(self.machines)
+        if not stage_machines:
+            return None
+        input_sources = input_sources_from_machines(self.machines)
+        output_sinks = output_sinks_from_machines(self.machines)
+        links = sort_links(
+            build_link_graph(
+                stage_machines,
+                nodes,
+                input_sources=input_sources or None,
+                output_sinks=output_sinks or None,
+            )
+        )
+        if not links:
+            return None
+        return links, nodes, stage_machines
+
+    def _route_layout_variant(
+        self,
+        *,
+        link_order_variant: int = 0,
+        links=None,
+        search_iteration: int | None = None,
+    ) -> None:
+        """Rebuild routing from machines using one link-group ordering variant."""
+        from planners.belt_network.optimize import group_order_for_search
+
+        self._rebuild_machine_entities()
+        for machine in self.machines:
+            if _is_io_cell(machine) or not machine.recipe_item:
+                continue
+            self._refresh_machine_lanes(machine)
+
+        nodes = rate_nodes_from_machines(self.machines, self.recipes_data)
+        stage_machines = stage_machines_from_placed(self.machines)
+        if not nodes or not stage_machines:
+            return
+
+        if links is None:
+            ctx = self._prepare_optimization_context()
+            if ctx is None:
+                return
+            links, nodes, stage_machines = ctx
+
+        group_order = None
+        if search_iteration is not None:
+            group_order = group_order_for_search(links, search_iteration)
+
+        input_sources = input_sources_from_machines(self.machines)
+        output_sinks = output_sinks_from_machines(self.machines)
+        self.entity_number, _ = route_placed_layout(
+            self.grid,
+            self.entities,
+            self.entity_number,
+            stage_machines,
+            nodes,
+            input_sources=input_sources or None,
+            output_sinks=output_sinks or None,
+            network_router=None,
+            link_order_variant=link_order_variant,
+            links=links,
+            group_order=group_order,
+        )
+        from planners.stage_connector import route_placed_layout as _rpl
+
+        self.network_router = getattr(_rpl, "_last_router", None)
+
+    def start_optimization_search(
+        self,
+        *,
+        stale_limit: int = 20,
+        max_iterations: int = 0,
+    ) -> bool:
+        """
+        Begin continuous optimization (caller runs optimization_search_step each frame).
+        """
+        ctx = self._prepare_optimization_context()
+        if ctx is None:
+            return False
+
+        from planners.belt_network.optimize import layout_score
+
+        links, nodes, stage_machines = ctx
+        self._search_links = links
+        self._search_nodes = nodes
+        self._search_stage_machines = stage_machines
+        self._search_stale_limit = max(1, int(stale_limit))
+        self._search_max_iterations = max(0, int(max_iterations))
+        self._search_iteration = 0
+        self._search_stale = 0
+        self._search_best_variant = 0
+        self._route_layout_variant(search_iteration=0, links=links)
+        self._search_best_score = layout_score(
+            self.entities,
+            stage_machines,
+            nodes,
+            links=links,
+            grid=self.grid,
+        )
+        self.optimization_search_active = True
+        logger.info(
+            "Optimization search started (stale_limit=%s, max_iter=%s)",
+            self._search_stale_limit,
+            self._search_max_iterations,
+        )
+        return True
+
+    def stop_optimization_search(self) -> None:
+        """Stop search and apply the best layout found."""
+        if not self.optimization_search_active:
+            return
+        from planners.belt_network.optimize import (
+            OptimizationResult,
+            count_splitters,
+            count_transport_belts,
+            count_underground_pairs,
+            evaluate_routing_quality,
+        )
+
+        links = self._search_links
+        nodes = self._search_nodes
+        stage_machines = self._search_stage_machines
+        if links and nodes and stage_machines:
+            self._route_layout_variant(
+                search_iteration=self._search_best_variant, links=links
+            )
+            metrics = evaluate_routing_quality(
+                self.entities, links, stage_machines, nodes, grid=self.grid
+            )
+            self.last_optimization = OptimizationResult(
+                improved=True,
+                belts_before=0,
+                belts_after=count_transport_belts(self.entities),
+                score_before=0.0,
+                score_after=metrics.composite_score,
+                variant_used=self._search_best_variant,
+                viable=metrics.viable,
+                message=(
+                    f"Search stopped at iter {self._search_iteration}: "
+                    f"{metrics.belt_count} belts, "
+                    f"{count_splitters(self.entities)} splitters, "
+                    f"{count_underground_pairs(self.entities)} UG"
+                ),
+                splitters_after=count_splitters(self.entities),
+                underground_pairs_after=count_underground_pairs(self.entities),
+            )
+        self.optimization_search_active = False
+        self._search_links = None
+        self._search_nodes = None
+        self._search_stage_machines = None
+
+    def optimization_search_step(self) -> object:
+        """
+        Run one search iteration. Call each frame while optimization_search_active.
+        """
+        from planners.belt_network.optimize import (
+            OptimizationSearchStatus,
+            count_splitters,
+            count_transport_belts,
+            count_underground_pairs,
+            layout_score,
+        )
+
+        if not self.optimization_search_active:
+            return OptimizationSearchStatus(
+                iteration=0,
+                stale_iterations=0,
+                continue_search=False,
+                improved=False,
+                belts=0,
+                splitters=0,
+                underground_pairs=0,
+                composite_score=0.0,
+                viable=False,
+                message="Search not active",
+            )
+
+        links = self._search_links or []
+        nodes = self._search_nodes or {}
+        stage_machines = self._search_stage_machines or {}
+
+        self._search_iteration += 1
+        trial = self._search_iteration
+        self._route_layout_variant(search_iteration=trial, links=links)
+        score = layout_score(
+            self.entities, stage_machines, nodes, links=links, grid=self.grid
+        )
+        improved = score > self._search_best_score
+        if improved:
+            self._search_best_score = score
+            self._search_best_variant = trial
+            self._search_stale = 0
+        else:
+            self._search_stale += 1
+
+        self._route_layout_variant(
+            search_iteration=self._search_best_variant, links=links
+        )
+
+        belts = count_transport_belts(self.entities)
+        splitters = count_splitters(self.entities)
+        ug = count_underground_pairs(self.entities)
+        viable = bool(score[0])
+        composite = float(score[1])
+
+        hit_stale = self._search_stale >= self._search_stale_limit
+        hit_max = (
+            self._search_max_iterations > 0
+            and self._search_iteration >= self._search_max_iterations
+        )
+        continue_search = not hit_stale and not hit_max
+
+        if hit_stale:
+            reason = f"no improvement for {self._search_stale_limit} iters"
+        elif hit_max:
+            reason = f"reached {self._search_max_iterations} iterations"
+        else:
+            reason = "searching"
+
+        message = (
+            f"Opt search #{trial}: {belts} belts, {splitters} spl, {ug} UG "
+            f"({'+' if improved else '='}) — {reason}"
+        )
+        status = OptimizationSearchStatus(
+            iteration=trial,
+            stale_iterations=self._search_stale,
+            continue_search=continue_search,
+            improved=improved,
+            belts=belts,
+            splitters=splitters,
+            underground_pairs=ug,
+            composite_score=composite,
+            viable=viable,
+            message=message,
+        )
+        if not continue_search:
+            self.stop_optimization_search()
+            status = OptimizationSearchStatus(
+                iteration=status.iteration,
+                stale_iterations=status.stale_iterations,
+                continue_search=False,
+                improved=status.improved,
+                belts=status.belts,
+                splitters=status.splitters,
+                underground_pairs=status.underground_pairs,
+                composite_score=status.composite_score,
+                viable=status.viable,
+                message=self.last_optimization.message
+                if self.last_optimization
+                else status.message,
+            )
+        return status
+
+    def optimization_pass(self, max_variants: int = 4) -> object:
+        """
+        Try several belt group orderings; keep the best viable layout.
+
+        Machines and cells stay fixed; only belts/inserters/splitters change.
+        """
+        from planners.belt_network.link_graph import build_link_graph, sort_links
+        from planners.belt_network.optimize import (
+            OptimizationResult,
+            count_splitters,
+            count_transport_belts,
+            count_underground_pairs,
+            evaluate_routing_quality,
+            layout_score,
+        )
+
+        nodes = rate_nodes_from_machines(self.machines, self.recipes_data)
+        stage_machines = stage_machines_from_placed(self.machines)
+        if not stage_machines:
+            result = OptimizationResult(
+                improved=False,
+                belts_before=0,
+                belts_after=0,
+                score_before=0.0,
+                score_after=0.0,
+                variant_used=0,
+                viable=False,
+                message="No machines with recipes to optimize",
+            )
+            self.last_optimization = result
+            return result
+
+        input_sources = input_sources_from_machines(self.machines)
+        output_sinks = output_sinks_from_machines(self.machines)
+        links = sort_links(
+            build_link_graph(
+                stage_machines,
+                nodes,
+                input_sources=input_sources or None,
+                output_sinks=output_sinks or None,
+            )
+        )
+        if not links:
+            result = OptimizationResult(
+                improved=False,
+                belts_before=count_transport_belts(self.entities),
+                belts_after=count_transport_belts(self.entities),
+                score_before=0.0,
+                score_after=0.0,
+                variant_used=0,
+                viable=False,
+                message="No belt links to optimize",
+            )
+            self.last_optimization = result
+            return result
+
+        belts_before = count_transport_belts(self.entities)
+        splitters_before = count_splitters(self.entities)
+        ug_before = count_underground_pairs(self.entities)
+        metrics_before = evaluate_routing_quality(
+            self.entities, links, stage_machines, nodes, grid=self.grid
+        )
+        score_before = metrics_before.composite_score
+
+        best_variant = 0
+        best_score = (-1, -1.0e18, 0, 0)
+        trials = max(1, min(max_variants, 4))
+
+        for variant in range(trials):
+            self._route_layout_variant(link_order_variant=variant, links=links)
+            score = layout_score(
+                self.entities,
+                stage_machines,
+                nodes,
+                links=links,
+                grid=self.grid,
+            )
+            if score > best_score:
+                best_score = score
+                best_variant = variant
+
+        self._route_layout_variant(link_order_variant=best_variant, links=links)
+        belts_after = count_transport_belts(self.entities)
+        splitters_after = count_splitters(self.entities)
+        ug_after = count_underground_pairs(self.entities)
+        metrics_after = evaluate_routing_quality(
+            self.entities, links, stage_machines, nodes, grid=self.grid
+        )
+        score_after = metrics_after.composite_score
+        viable_a = metrics_after.viable
+        improved = score_after > score_before or (
+            viable_a and belts_after < belts_before
+        )
+        if improved:
+            msg = (
+                f"Optimized: {belts_before}→{belts_after} belts, "
+                f"{splitters_after} splitters, {ug_after} UG pairs "
+                f"(variant {best_variant})"
+            )
+        elif viable_a:
+            msg = (
+                f"No improvement — {belts_after} belts, "
+                f"{splitters_after} splitters, {ug_after} UG pairs "
+                f"(variant {best_variant})"
+            )
+        else:
+            msg = "Layout still has connectivity issues after optimization"
+
+        logger.info(msg)
+        if metrics_after.details:
+            logger.info("Optimize metrics: %s", ", ".join(metrics_after.details))
+        result = OptimizationResult(
+            improved=improved,
+            belts_before=belts_before,
+            belts_after=belts_after,
+            score_before=score_before,
+            score_after=score_after,
+            variant_used=best_variant,
+            viable=bool(viable_a),
+            message=msg,
+            splitters_before=splitters_before,
+            splitters_after=splitters_after,
+            underground_pairs_before=ug_before,
+            underground_pairs_after=ug_after,
+        )
+        self.last_optimization = result
+        return result
+
+    def partial_reroute(self, group_keys: set[str]) -> None:
+        """Re-route only belt groups touching changed machines (incremental mode)."""
+        from planners.belt_network.link_graph import build_link_graph, sort_links
+        from planners.belt_network.materialize import materialize_link_group
+        from planners.belt_network.occupancy import RoutingOccupancy
+        from planners.belt_network.router import BeltNetworkRouter
+
+        router = self.network_router
+        if not isinstance(router, BeltNetworkRouter) or not group_keys:
+            self.full_reroute()
+            return
+
+        for machine in self.machines:
+            if _is_io_cell(machine) or not machine.recipe_item:
+                continue
+            self._refresh_machine_lanes(machine)
+
+        nodes = rate_nodes_from_machines(self.machines, self.recipes_data)
+        stage_machines = stage_machines_from_placed(self.machines)
+        if not nodes or not stage_machines:
+            return
+
+        input_sources = input_sources_from_machines(self.machines)
+        output_sinks = output_sinks_from_machines(self.machines)
+        links = sort_links(
+            build_link_graph(
+                stage_machines,
+                nodes,
+                input_sources=input_sources or None,
+                output_sinks=output_sinks or None,
+            )
+        )
+        groups: dict[str, list] = {}
+        for link in links:
+            if link.group_key in group_keys:
+                groups.setdefault(link.group_key, []).append(link)
+
+        if not groups:
+            self.full_reroute()
+            return
+
+        router.strip_groups(self.grid, self.entities, group_keys)
+        occupancy = RoutingOccupancy(self.grid)
+        for group_links in groups.values():
+            self.entity_number = materialize_link_group(
+                self.grid,
+                self.entities,
+                self.entity_number,
+                occupancy,
+                group_links,
+            )
+
+    def _group_keys_for_recipe_change(self, recipe_item: str | None) -> set[str]:
+        """Best-effort group keys to rerun when a machine recipe changes."""
+        keys: set[str] = set()
+        if recipe_item:
+            recipe = self._recipe(recipe_item)
+            for dep in (recipe or {}).get("ingredients", {}):
+                for m in self.machines:
+                    if m.is_input_cell and m.input_resource == dep:
+                        cx, cy = m.position
+                        keys.add(f"base:{dep}:{cx},{cy}")
+            for m in self.machines:
+                if m.recipe_item == recipe_item and m.lanes:
+                    out = m.lanes.get("output_start", m.lanes.get("output_end"))
+                    if out:
+                        keys.add(f"stage:{out[0]},{out[1]}")
+        return keys
 
     def _refresh_machine_lanes(self, machine: PlacedMachine) -> None:
         recipe = self._recipe(machine.recipe_item)

@@ -65,7 +65,7 @@ Each entity in `blueprint["blueprint"]["entities"]` is a dict compatible with Fa
 | `entity_number` | yes | Unique index in blueprint |
 | `name` | yes | Prototype name (`transport-belt`, `assembling-machine-1`, …) |
 | `position` | yes | `{"x": float, "y": float}` — tile position |
-| `direction` | belts/inserters | `0–7` = N/NE/E/SE/S/SW/W/NW (`constants.DIRECTIONS`) |
+| `direction` | belts/inserters/splitters | Factorio 2.0 values: N=0, E=4, S=8, W=12 (see `constants.DIRECTIONS`) |
 | `recipe` | assemblers/furnaces | Product item id |
 
 Example machine:
@@ -86,7 +86,7 @@ Example belt:
   "entity_number": 2,
   "name": "transport-belt",
   "position": {"x": 38, "y": 16},
-  "direction": 2
+  "direction": 4
 }
 ```
 
@@ -123,11 +123,32 @@ constants_module.PRODUCTION_TARGETS = custom_recipes
 
 ### `config.json` (repo root, gitignored)
 
-Created by Settings UI. Example:
+Created by Settings UI and workspace **Options**. Example:
 
 ```json
 {
-  "factorio_install_path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Factorio"
+  "factorio_install_path": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Factorio",
+  "window_width": 1280,
+  "window_height": 720,
+  "placement_settings": {
+    "rule_based": {
+      "connection_gap": 2,
+      "network_seed_x": 12,
+      "network_seed_y": 14,
+      "row_stride_y": 14
+    },
+    "genetic": {
+      "population_size": 64,
+      "min_generations": 20,
+      "max_generations": 2500,
+      "stale_generations_limit": 120,
+      "mutation_rate": 0.85,
+      "placement_x_min": 5,
+      "placement_x_max": 160,
+      "placement_y_min": 4,
+      "placement_y_max": 90
+    }
+  }
 }
 ```
 
@@ -149,4 +170,6 @@ Legacy key `factorio_graphics_path` (full path) still supported.
 }
 ```
 
-`BlueprintRenderer` adds `"placement": PlacementStrategy` before calling the pipeline.
+`BlueprintRenderer` adds `"placement": PlacementStrategy` and loads `PlacementSettingsBundle` from config before calling the pipeline.
+
+Blueprint JSON uses `FACTORIO_BLUEPRINT_VERSION` (`562949958402048`) in `blueprint.version` — Factorio 2.0 map exchange format.

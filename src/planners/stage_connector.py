@@ -5,6 +5,9 @@ import logging
 from core.constants import (
     BASE_MATERIALS,
     FACTORIO_EAST,
+    FACTORIO_NORTH,
+    FACTORIO_SOUTH,
+    FACTORIO_WEST,
     UNDERGROUND_BELT_MAX_UNDERGROUND_TILES,
     direction_for_flow,
 )
@@ -123,17 +126,36 @@ def stage_lanes_from_machines(machines, flow_direction=FACTORIO_EAST, recipe: di
     }
 
 
-def _route_belt_path(grid, start, end):
-    """Prefer A* around obstacles; fall back to an L-shaped Manhattan path."""
-    from core.pathfinding import Pathfinder
-
+def _route_belt_path(grid, start, end, item: str | None = None):
+    """Prefer belt-aware A*; fall back to empty-only L-shaped Manhattan."""
     if start == end:
         return [start]
+
+    if item is not None:
+        from planners.belt_network.occupancy import RoutingOccupancy
+        from planners.belt_network.pathfinder import BeltPathfinder
+
+        occupancy = RoutingOccupancy(grid)
+        pathfinder = BeltPathfinder(occupancy, allow_underground=True)
+        try:
+            return pathfinder.route_or_conflict(start, end, item, allow_empty_manhattan=True)
+        except Exception:
+            pass
+
+    from core.pathfinding import Pathfinder
 
     pathfinder = Pathfinder(grid)
     routed = pathfinder.shortest_path(start, end)
     if routed and len(routed) >= 2:
         return routed
+
+    from planners.belt_network.occupancy import RoutingOccupancy
+    from planners.belt_network.pathfinder import BeltPathfinder
+
+    occupancy = RoutingOccupancy(grid)
+    empty_path = BeltPathfinder(occupancy)._empty_only_manhattan(start, end, item or "")
+    if empty_path:
+        return empty_path
     return _manhattan_path(start, end)
 
 
@@ -341,6 +363,48 @@ def place_belt_path(grid, entities, entity_number, path):
     return entity_number
 
 
+def _splitter_footprint(direction: int) -> tuple[int, int]:
+    """Grid footprint (width, height) for a splitter facing ``direction``."""
+    from core.splitter_geometry import splitter_footprint_size
+
+    return splitter_footprint_size(direction)
+
+
+def _splitter_input_tile(splitter_x: int, splitter_y: int, direction: int = FACTORIO_EAST) -> tuple[int, int]:
+    """Primary belt tile that feeds the splitter input face."""
+    from core.splitter_geometry import splitter_layout
+
+    return splitter_layout((splitter_x, splitter_y), direction).input_belt
+
+
+def _ensure_splitter_input_belt(
+    grid,
+    entities,
+    entity_number,
+    splitter_x: int,
+    splitter_y: int,
+    *,
+    feed_from: tuple[int, int] | None = None,
+    direction: int = FACTORIO_EAST,
+) -> int:
+    """
+    Route/place the belt segment that feeds a splitter before the splitter is placed.
+
+    Avoids branch paths or A* later claiming the splitter's input tile.
+    """
+    input_x, input_y = _splitter_input_tile(splitter_x, splitter_y, direction)
+    flow_dir = direction if direction in (FACTORIO_EAST, FACTORIO_WEST, FACTORIO_NORTH, FACTORIO_SOUTH) else FACTORIO_EAST
+
+    if feed_from and feed_from != (input_x, input_y):
+        path = _route_belt_path(feed_from, (input_x, input_y))
+        entity_number = place_belt_path(grid, entities, entity_number, path)
+    elif not grid.is_occupied(input_x, input_y):
+        entity_number = _place_belt(
+            grid, entities, entity_number, input_x, input_y, flow_dir
+        )
+    return entity_number
+
+
 def _place_splitter(
     grid,
     entities,
@@ -355,9 +419,10 @@ def _place_splitter(
 
     Notes:
     - Blueprint encoding converts planner top-left tile coords to entity centers.
-    - Grid occupancy uses 2x1 so belts won't be placed on top of the splitter.
+    - Grid occupancy uses 2x1 (east/west) or 1x2 (north/south) so belts won't overlap.
     """
-    if grid.is_occupied(x, y, width=2, height=1):
+    width, height = _splitter_footprint(direction)
+    if grid.is_occupied(x, y, width=width, height=height):
         return entity_number
 
     entities.append(
@@ -368,7 +433,7 @@ def _place_splitter(
             "direction": direction,
         }
     )
-    grid.occupy(x, y, name, [2, 1])
+    grid.occupy(x, y, name, [width, height])
     return entity_number + 1
 
 
@@ -402,10 +467,20 @@ def _needs_splitter_fanout(requests):
     return len(targets) >= 2
 
 
+def _needs_splitter_fanout_from_links(links) -> bool:
+    """True when a link group has two or more distinct sink endpoints."""
+    if len(links) < 2:
+        return False
+    sinks = {link.sink for link in links}
+    return len(sinks) >= 2
+
+
 def _east_splitter_output_lanes(splitter_x: int, splitter_y: int) -> tuple[tuple[int, int], tuple[int, int]]:
-    """North and south belt tiles immediately east of an east-facing splitter."""
-    exit_x = splitter_x + 2
-    return (exit_x, splitter_y - 1), (exit_x, splitter_y + 1)
+    """Two output belt tiles for an east-facing splitter (north/south branches)."""
+    from core.splitter_geometry import splitter_layout
+
+    outputs = sorted(splitter_layout((splitter_x, splitter_y), FACTORIO_EAST).output_belts)
+    return outputs[0], outputs[1]
 
 
 def _assign_splitter_branch_starts(
@@ -653,6 +728,15 @@ def connect_stages(
 
         splitter_x = out_x + 1
         splitter_y = out_y
+        entity_number = _ensure_splitter_input_belt(
+            grid,
+            entities,
+            entity_number,
+            splitter_x,
+            splitter_y,
+            feed_from=producer_output_end,
+            direction=FACTORIO_EAST,
+        )
         before = entity_number
         entity_number = _place_splitter(
             grid,
@@ -758,6 +842,11 @@ def route_placed_layout(
     output_sinks: dict[str, list[tuple[int, int]]] | None = None,
     placement_recorder=None,
     place_machine_knots: bool = True,
+    use_network_router: bool = True,
+    network_router=None,
+    link_order_variant: int = 0,
+    links=None,
+    group_order=None,
 ) -> tuple[int, dict[str, tuple[int, int]]]:
     """
     Route belts for a fixed machine layout.
@@ -767,6 +856,10 @@ def route_placed_layout(
     ``nodes`` is the rate graph keyed by item. Optional ``input_sources`` maps
     base material to user-placed chest positions (assisted input cells).
     Optional ``output_sinks`` maps product item to user-placed output chests.
+
+    When ``use_network_router`` is True (default), routes via the belt network
+    planner (link graph + shared trunks). Pass ``network_router`` to preserve
+    state for incremental reroute in Assisted Build.
     """
     if place_machine_knots:
         from planners.machine_io import place_machine_endpoint_inserters
@@ -778,6 +871,27 @@ def route_placed_layout(
             stage_machines,
             nodes,
         )
+
+    if use_network_router:
+        from planners.belt_network.router import route_placed_layout_network
+
+        entity_number, input_starts, router = route_placed_layout_network(
+            grid,
+            entities,
+            entity_number,
+            stage_machines,
+            nodes,
+            input_sources=input_sources,
+            output_sinks=output_sinks,
+            placement_recorder=placement_recorder,
+            router=network_router,
+            link_order_variant=link_order_variant,
+            links=links,
+            group_order=group_order,
+        )
+        route_placed_layout._last_router = router  # type: ignore[attr-defined]
+        return entity_number, input_starts
+
     entity_number = connect_stages(
         grid,
         entities,
@@ -968,11 +1082,15 @@ def _connect_feed_fanout(
     feed_x, feed_y = feed_start
     splitter_x = feed_x + 1
     splitter_y = feed_y
-    # One belt on the chest inserter drop tile; splitter sits on the next tile east.
-    if not grid.is_occupied(feed_x, feed_y):
-        entity_number = _place_belt(
-            grid, entities, entity_number, feed_x, feed_y, FACTORIO_EAST
-        )
+    entity_number = _ensure_splitter_input_belt(
+        grid,
+        entities,
+        entity_number,
+        splitter_x,
+        splitter_y,
+        feed_from=feed_start,
+        direction=FACTORIO_EAST,
+    )
 
     before = entity_number
     entity_number = _place_splitter(

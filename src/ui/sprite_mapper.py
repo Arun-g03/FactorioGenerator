@@ -28,7 +28,9 @@ class SpriteMapper:
             return f"{entity_name}-platform"
 
         if "splitter" in entity_name:
-            return f"{entity_name}-north"
+            suffix = direction_sprite_suffix(direction)
+            directional = f"{entity_name}-{suffix}"
+            return directional
 
         if entity_name.startswith("pipe"):
             return entity_name
